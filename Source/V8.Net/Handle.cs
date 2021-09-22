@@ -1800,7 +1800,7 @@ namespace V8.Net
         public InternalHandle GetPrototype() // (cannot be a property, else )
         {
             if (!IsObjectType) throw new InvalidOperationException(_NOT_AN_OBJECT_ERRORMSG);
-            return V8NetProxy.GetObjectPrototype(_HandleProxy);
+            return new InternalHandle(V8NetProxy.GetObjectPrototype(_HandleProxy), true);
         }
 
         // --------------------------------------------------------------------------------------------------------------------
