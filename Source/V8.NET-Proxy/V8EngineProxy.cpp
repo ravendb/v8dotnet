@@ -41,7 +41,7 @@ void _StringItem::Clear() { String = nullptr; Length = 0; }
 
 static bool _V8Initialized = false;
 
-vector<bool> V8EngineProxy::_DisposedEngines(100, false);
+std::vector<bool> V8EngineProxy::_DisposedEngines(100, false);
 
 int32_t V8EngineProxy::_NextEngineID = 0;
 
@@ -110,7 +110,7 @@ V8EngineProxy::V8EngineProxy(bool enableDebugging, DebugMessageDispatcher* debug
 
 	_Isolate->SetData(0, this); // (sets a reference in the isolate to the proxy [useful within callbacks])
 
-	if ((vector<bool>::size_type)_NextEngineID >= _DisposedEngines.capacity())
+	if ((std::vector<bool>::size_type)_NextEngineID >= _DisposedEngines.capacity())
 		_DisposedEngines.resize(_DisposedEngines.capacity() + 32);
 
 	if (_NextEngineID == 0)
@@ -245,7 +245,7 @@ HandleProxy* V8EngineProxy::GetHandleProxy(Handle<Value> handle)
 			handleProxy = _Handles.at(id);
 #if DEBUG
 			if (handleProxy->_EngineID < -2 || handleProxy->_EngineID > 1000)
-				throw exception("V8EngineProxy::GetHandleProxy(): Assertion failed: The engine ID for the disposed proxy handle does not look right.");
+				throw runtime_error("V8EngineProxy::GetHandleProxy(): Assertion failed: The engine ID for the disposed proxy handle does not look right.");
 #endif
 			handleProxy->_EngineProxy = this;
 			handleProxy->_EngineID = _EngineID;
@@ -264,7 +264,7 @@ HandleProxy* V8EngineProxy::GetHandleProxy(Handle<Value> handle)
 		}
 	}
 
-	if (handleProxy == nullptr) throw exception("V8EngineProxy::GetHandleProxy(): The engine is gone! Cannot create any handles.");
+	if (handleProxy == nullptr) throw runtime_error("V8EngineProxy::GetHandleProxy(): The engine is gone! Cannot create any handles.");
 
 	return handleProxy;
 }
@@ -299,7 +299,7 @@ void V8EngineProxy::DisposeHandleProxy(HandleProxy *handleProxy)
 	{
 #if DEBUG
 		if (!_DisposedHandles.empty() && std::find(_DisposedHandles.begin(), _DisposedHandles.end(), handleProxy->_ID) != _DisposedHandles.end())
-			throw exception("DisposeHandleProxy(): A handle ID already exists! There should not be two of the same IDs in the queue.");
+			throw runtime_error("DisposeHandleProxy(): A handle ID already exists! There should not be two of the same IDs in the queue.");
 #endif
 		_DisposedHandles.push_back(handleProxy->_ID); // (this is a queue of disposed handles to use for recycling; Note: the persistent handles are NEVER disposed until they become reinitialized)
 	}
@@ -415,11 +415,15 @@ ContextProxy* V8EngineProxy::CreateContext(ObjectTemplateProxy* templateProxy)
 
 	context->Enter(); // (in case we need this now)
 
-	auto globalObject = context->Global()->GetPrototype()->ToObject(_Isolate);
+	auto globalObject = ToLocalThrow(context->Global()->GetPrototype()->ToObject(_Context), "Failed to get global object");
 	globalObject->SetAlignedPointerInInternalField(0, templateProxy); // (proxy object reference)
 	globalObject->SetInternalField(1, External::New(_Isolate, (void*)-1)); // (manage object ID, which is only applicable when tracking many created objects [and not a single engine or global scope])
 
-	auto contextProxy = new ContextProxy(this, context); // (the native side will own this, and is responsible to free it when done)
+	CopyablePersistent<v8::Context> contextCP(context);
+	auto contextProxy = new ContextProxy(this, contextCP); // (the native side will own this, and is responsible to free it when done)
+
+	//_Inspector = std::unique_ptr<Inspector>(new Inspector(_Platform, context, _InspectorPort + templateProxy->_EngineID));
+	//_Inspector->startAgent();
 
 	context->Exit();
 
@@ -441,7 +445,7 @@ HandleProxy* V8EngineProxy::SetContext(ContextProxy* contextProxy)
 		_GlobalObject.Reset(); // (release the handle first)
 
 	_Context = contextProxy->_Context; // (set the new context)
-	auto global = _Context->Global()->GetPrototype()->ToObject(_Isolate); // (keep a reference to the global object for faster reference)
+	auto global = ToLocalThrow(_Context->Global()->GetPrototype()->ToObject(_Context), "Failed to get global object"); // (keep a reference to the global object for faster reference)
 	_GlobalObject = global; // (set the new global object)
 
 	return GetHandleProxy(global);
@@ -469,24 +473,24 @@ Local<String> V8EngineProxy::GetErrorMessage(Local<v8::Context> ctx, TryCatch &t
 
 	if (stackExists && exceptionExists)
 	{
-		stackStr = stack->ToString(isolate);
+		stackStr = stack->ToString(ctx).FromMaybe(Local<String>());
 
-		auto exceptionMsg = tryCatch.Exception()->ToString(isolate);
+		auto exceptionMsg = tryCatch.Exception()->ToString(ctx).FromMaybe(Local<String>());
 
 		// ... detect if the start of the stack message is the same as the exception message, then remove it (seems to happen when managed side returns an error) ...
 
 		if (stackStr->Length() >= exceptionMsg->Length())
 		{
 			uint16_t* ss = new uint16_t[stackStr->Length() + 1];
-			stack->ToString(isolate)->Write(isolate, ss); // (copied to a new array in order to offset the character pointer to extract a substring)
+			stack->ToString(ctx).FromMaybe(Local<String>())->Write(isolate, ss); // (copied to a new array in order to offset the character pointer to extract a substring)
 
 			// ... get the same number of characters from the stack message as the exception message length ...
-			auto subStackStr = NewSizedUString(ss, exceptionMsg->Length());
+			auto subStackStr = NewSizedUString(ss, exceptionMsg->Length()).FromMaybe(Local<String>());
 
-			if (exceptionMsg->Equals(ctx, subStackStr).ToChecked())
+			if (exceptionMsg->Equals(ctx, subStackStr).FromMaybe(false))
 			{
 				// ... using the known exception message length, ...
-				auto stackPartStr = NewSizedUString(ss + exceptionMsg->Length(), stackStr->Length() - exceptionMsg->Length());
+				auto stackPartStr = NewSizedUString(ss + exceptionMsg->Length(), stackStr->Length() - exceptionMsg->Length()).FromMaybe(Local<String>());
 				stackStr = stackPartStr;
 			}
 
@@ -494,37 +498,37 @@ Local<String> V8EngineProxy::GetErrorMessage(Local<v8::Context> ctx, TryCatch &t
 		}
 	}
 
-	auto msgStr = messageExists ? msg->Get() : NewString("");
+	auto msgStr = (messageExists ? msg->Get() : NewString("")).FromMaybe(Local<String>());
 
 	if (tryCatch.HasTerminated())
 	{
 		if (msgStr->Length() > 0)
-			msgStr = msgStr->Concat(isolate, msgStr, NewString("\r\n"));
-		msgStr = msgStr->Concat(isolate, msgStr, NewString("Script execution aborted by request."));
+			msgStr = msgStr->Concat(isolate, msgStr, NewString("\r\n").FromMaybe(Local<String>()));
+		msgStr = msgStr->Concat(isolate, msgStr, NewString("Script execution aborted by request.").FromMaybe(Local<String>()));
 	}
 
 	if (messageExists)
 	{
-		msgStr = msgStr->Concat(isolate, msgStr, NewString("\r\n"));
+		msgStr = msgStr->Concat(isolate, msgStr, NewString("\r\n").FromMaybe(Local<String>()));
 
-		msgStr = msgStr->Concat(isolate, msgStr, NewString("  Line: "));
-		auto line = NewInteger(msg->GetLineNumber(ctx).ToChecked())->ToString(ctx).ToLocalChecked();
+		msgStr = msgStr->Concat(isolate, msgStr, NewString("  Line: ").FromMaybe(Local<String>()));
+		auto line = NewInteger(ToThrow(msg->GetLineNumber(ctx)))->ToString(ctx).FromMaybe(Local<String>());
 		msgStr = msgStr->Concat(isolate, msgStr, line);
 
-		msgStr = msgStr->Concat(isolate, msgStr, NewString("  Column: "));
-		auto col = NewInteger(msg->GetStartColumn(ctx).ToChecked())->ToString(ctx).ToLocalChecked();
+		msgStr = msgStr->Concat(isolate, msgStr, NewString("  Column: ").FromMaybe(Local<String>()));
+		auto col = NewInteger(ToThrow(msg->GetStartColumn(ctx)))->ToString(ctx).FromMaybe(Local<String>());
 		msgStr = msgStr->Concat(isolate, msgStr, col);
 	}
 
 	if (stackExists)
 	{
-		msgStr = msgStr->Concat(isolate, msgStr, NewString("\r\n"));
+		msgStr = msgStr->Concat(isolate, msgStr, NewString("\r\n").FromMaybe(Local<String>()));
 
-		msgStr = msgStr->Concat(isolate, msgStr, NewString("  Stack: "));
+		msgStr = msgStr->Concat(isolate, msgStr, NewString("  Stack: ").FromMaybe(Local<String>()));
 		msgStr = msgStr->Concat(isolate, msgStr, stackStr);
 	}
 
-	msgStr = msgStr->Concat(isolate, msgStr, NewString("\r\n"));
+	msgStr = msgStr->Concat(isolate, msgStr, NewString("\r\n").FromMaybe(Local<String>()));
 
 	return msgStr;
 }
@@ -541,8 +545,8 @@ HandleProxy* V8EngineProxy::Execute(const uint16_t* script, uint16_t* sourceName
 
 		if (sourceName == nullptr) sourceName = (uint16_t*)L"";
 
-		ScriptOrigin origin(NewUString(sourceName));
-		auto compiledScript = Script::Compile(_Context, NewUString(script), &origin);
+		ScriptOrigin origin(ToLocalThrow(NewUString(sourceName)));
+		auto compiledScript = Script::Compile(_Context, ToLocalThrow(NewUString(script)), &origin);
 
 		if (__tryCatch.HasCaught())
 		{
@@ -550,11 +554,11 @@ HandleProxy* V8EngineProxy::Execute(const uint16_t* script, uint16_t* sourceName
 			returnVal->_Type = JSV_CompilerError;
 		}
 		else if (!compiledScript.IsEmpty())
-			returnVal = Execute(compiledScript.ToLocalChecked());
+			returnVal = Execute(ToLocalThrow(compiledScript));
 	}
-	catch (exception ex)
+	catch (runtime_error ex)
 	{
-		returnVal = GetHandleProxy(NewString(ex.what()));
+		returnVal = GetHandleProxy(ToLocalThrow(NewString(ex.what())));
 		returnVal->_Type = JSV_InternalError;
 	}
 
@@ -580,13 +584,13 @@ HandleProxy* V8EngineProxy::Execute(Handle<Script> script)
 			returnVal->_Type = __tryCatch.HasTerminated() ? JSV_ExecutionTerminated : JSV_ExecutionError;
 		}
 		else  if (!result.IsEmpty())
-			returnVal = GetHandleProxy(result.ToLocalChecked());
+			returnVal = GetHandleProxy(ToLocalThrow(result));
 
 		_IsTerminatingScript = false;
 	}
-	catch (exception ex)
+	catch (runtime_error ex)
 	{
-		returnVal = GetHandleProxy(NewString(ex.what()));
+		returnVal = GetHandleProxy(NewString(ex.what()).FromMaybe(Local<String>()));
 		returnVal->_Type = JSV_InternalError;
 	}
 
@@ -604,9 +608,9 @@ HandleProxy* V8EngineProxy::Compile(const uint16_t* script, uint16_t* sourceName
 
 		if (sourceName == nullptr) sourceName = (uint16_t*)L"";
 
-		auto hScript = NewUString(script);
+		auto hScript = ToLocalThrow(NewUString(script));
 
-		ScriptOrigin origin(NewUString(sourceName));
+		ScriptOrigin origin(ToLocalThrow(NewUString(sourceName)));
 
 		auto compiledScript = Script::Compile(_Context, hScript, &origin);
 
@@ -618,13 +622,13 @@ HandleProxy* V8EngineProxy::Compile(const uint16_t* script, uint16_t* sourceName
 		else if (!compiledScript.IsEmpty())
 		{
 			returnVal = GetHandleProxy(Handle<Value>());
-			returnVal->SetHandle(compiledScript.ToLocalChecked());
+			returnVal->SetHandle(ToLocalThrow(compiledScript));
 			returnVal->_Value.V8String = _StringItem(this, *hScript).String;
 		}
 	}
-	catch (exception ex)
+	catch (runtime_error ex)
 	{
-		returnVal = GetHandleProxy(NewString(ex.what()));
+		returnVal = GetHandleProxy(NewString(ex.what()).FromMaybe(Local<String>()));
 		returnVal->_Type = JSV_InternalError;
 	}
 
@@ -649,7 +653,7 @@ HandleProxy* V8EngineProxy::Call(HandleProxy *subject, const uint16_t *functionN
 
 	auto hThis = _this->Handle();
 	if (hThis.IsEmpty() || !hThis->IsObject())
-		throw exception("Call: The target instance handle ('this') does not represent an object.");
+		throw runtime_error("Call: The target instance handle ('this') does not represent an object.");
 
 	auto hSubject = subject->Handle();
 	Handle<Function> hFunc;
@@ -657,17 +661,17 @@ HandleProxy* V8EngineProxy::Call(HandleProxy *subject, const uint16_t *functionN
 	if (functionName != nullptr) // (if no name is given, assume the subject IS a function object, otherwise get the property as a function)
 	{
 		if (hSubject.IsEmpty() || !hSubject->IsObject())
-			throw exception("Call: The subject handle does not represent an object.");
+			throw runtime_error("Call: The subject handle does not represent an object.");
 
-		auto hProp = hSubject.As<Object>()->Get(NewUString(functionName));
+		auto hProp = ToLocalThrow(hSubject.As<Object>()->Get(_Context, ToLocalThrow(NewUString(functionName))));
 
 		if (hProp.IsEmpty() || !hProp->IsFunction())
-			throw exception("Call: The specified property does not represent a function.");
+			throw runtime_error("Call: The specified property does not represent a function.");
 
 		hFunc = hProp.As<Function>();
 	}
 	else if (hSubject.IsEmpty() || !hSubject->IsFunction())
-		throw exception("Call: The subject handle does not represent a function.");
+		throw runtime_error("Call: The subject handle does not represent a function.");
 	else
 		hFunc = hSubject.As<Function>();
 
@@ -692,7 +696,7 @@ HandleProxy* V8EngineProxy::Call(HandleProxy *subject, const uint16_t *functionN
 		returnVal = GetHandleProxy(GetErrorMessage(_Context, __tryCatch));
 		returnVal->_Type = JSV_ExecutionError;
 	}
-	else returnVal = result.IsEmpty() ? nullptr : GetHandleProxy(result.ToLocalChecked());
+	else returnVal = result.IsEmpty() ? nullptr : GetHandleProxy(ToLocalThrow(result));
 
 	return returnVal;
 }
@@ -716,12 +720,12 @@ HandleProxy* V8EngineProxy::CreateBoolean(bool b)
 
 HandleProxy* V8EngineProxy::CreateString(const uint16_t* str)
 {
-	return GetHandleProxy(NewUString(str));
+	return GetHandleProxy(ToLocalThrow(NewUString(str)));
 }
 
 Local<Private> V8EngineProxy::CreatePrivateString(const char* value)
 {
-	return Private::ForApi(_Isolate, NewString(value)); // ('ForApi' is required, otherwise a new "virtual" symbol reference of some sort will be created with the same name on each request [duplicate names, but different symbols virtually])
+	return Private::ForApi(_Isolate, ToLocalThrow(NewString(value))); // ('ForApi' is required, otherwise a new "virtual" symbol reference of some sort will be created with the same name on each request [duplicate names, but different symbols virtually])
 }
 
 void V8EngineProxy::SetObjectPrivateValue(Local<Object> obj, const char* name, Local<Value> value)
@@ -733,20 +737,20 @@ Local<Value> V8EngineProxy::GetObjectPrivateValue(Local<Object> obj, const char*
 {
 	auto phandle = obj->GetPrivate(_Context, CreatePrivateString("ManagedObjectID"));
 	if (phandle.IsEmpty()) return V8Undefined;
-	return phandle.ToLocalChecked();
+	return ToLocalThrow(phandle);
 }
 
 HandleProxy* V8EngineProxy::CreateError(const uint16_t* message, JSValueType errorType)
 {
-	if (errorType >= 0) throw exception("Invalid error type.");
-	auto h = GetHandleProxy(NewUString(message));
+	if (errorType >= 0) throw runtime_error("Invalid error type.");
+	auto h = GetHandleProxy(NewUString(message).FromMaybe(Local<String>()));
 	h->_Type = errorType;
 	return h;
 }
 HandleProxy* V8EngineProxy::CreateError(const char* message, JSValueType errorType)
 {
-	if (errorType >= 0) throw exception("Invalid error type.");
-	auto h = GetHandleProxy(NewString(message));
+	if (errorType >= 0) throw runtime_error("Invalid error type.");
+	auto h = GetHandleProxy(NewString(message).FromMaybe(Local<String>()));
 	h->_Type = errorType;
 	return h;
 }
@@ -773,7 +777,7 @@ HandleProxy* V8EngineProxy::CreateArray(HandleProxy** items, uint16_t length)
 
 	if (items != nullptr && length > 0)
 		for (auto i = 0; i < length; i++)
-			array->Set(i, items[i]->_Handle);
+			array->Set(_Context, i, items[i]->_Handle);
 
 	return GetHandleProxy(array);
 }
@@ -784,7 +788,7 @@ HandleProxy* V8EngineProxy::CreateArray(uint16_t** items, uint16_t length)
 
 	if (items != nullptr && length > 0)
 		for (auto i = 0; i < length; i++)
-			array->Set(i, NewUString(items[i]));
+			array->Set(_Context, i, ToLocalThrow(NewUString(items[i])));
 
 	return GetHandleProxy(array);
 }

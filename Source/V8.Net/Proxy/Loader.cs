@@ -21,11 +21,11 @@ namespace V8.Net
 
 #if NETSTANDARD
         public const int RTLD_NOW = 0x002;
-        [DllImport("libdl")] // (could be "libdl.so.2" also: https://github.com/mellinoe/nativelibraryloader/issues/2#issuecomment-414476716)
-        public static extern IntPtr DLOpen(string fileName, int flags);
+        [DllImport("libdl.so")] // (could be "libdl.so.2" also: https://github.com/mellinoe/nativelibraryloader/issues/2#issuecomment-414476716)
+        public static extern IntPtr dlopen(string fileName, int flags);
 
         [DllImport("libdl.so.2")]
-        public static extern IntPtr DLOpen2(string fileName, int flags);
+        public static extern IntPtr dlopen2(string fileName, int flags);
 
         /// <summary>
         ///     Supports ASP.Net Core hosting environments.  If set, and <see cref="AlternateRootSubPath"/> is a relative path, then
@@ -36,33 +36,82 @@ namespace V8.Net
 
         static bool TryLoad(string rootPath)
         {
+            string filepath = null;
             try
             {
-                var libname = "V8_Net_Proxy_" + (Environment.Is64BitProcess ? "x64" : "x86");
-                var filepath = Path.Combine(rootPath, libname);
-                string filepathPlusExt = null;
 #if NETSTANDARD
                 // ... check 'codebaseuri' - this is the *original* assembly location before it was shadow-copied for ASP.NET pages ...
 
-                if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-                    try { filepathPlusExt = filepath + ".dylib"; if (!File.Exists(filepathPlusExt)) return false; DLOpen(filepathPlusExt, RTLD_NOW); } catch (Exception ex) { DLOpen2(filepathPlusExt, RTLD_NOW); }
-                else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-                    try { filepathPlusExt = filepath + ".os"; if (!File.Exists(filepathPlusExt)) return false; DLOpen(filepathPlusExt, RTLD_NOW); } catch (Exception ex) { DLOpen2(filepathPlusExt, RTLD_NOW); }
+                string prefix = "";
+                string processor = null;
+                string extension = null;
+                string bits = (Environment.Is64BitProcess ? "64" : "32");
+                var libname = "{prefix}V8_Net_Proxy_{processor}_{bits}.{ext}";
+                filepath = Path.Combine(rootPath, libname);
+                if (RuntimeInformation.ProcessArchitecture == Architecture.Arm)
+                {
+                    processor = "arm";
+                }
                 else
                 {
-                    filepathPlusExt = filepath + ".dll";
-                    if (!File.Exists(filepathPlusExt)) return false;
-                    LoadLibrary(filepath + ".dll");
+                    processor = "x86";
                 }
-                return true;
+                filepath = filepath.Replace("{processor}", processor).Replace("{bits}", bits);
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX) || RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) {
+                    prefix = "lib";
+                    if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) {
+                        processor = "mac";
+                        extension = "dylib";
+                    }
+                    else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) {
+                        extension = "so";
+                    }
+                    filepath = filepath.Replace("{prefix}", prefix).Replace("{ext}", extension);
+                    try { 
+                        if (!File.Exists(filepath)) {
+                            Console.WriteLine($"No file found: " + filepath);
+                            return false; 
+                        }
+                        dlopen(filepath, RTLD_NOW); 
+                    } 
+                    catch (Exception ex) { 
+                        if (Environment.UserInteractive) {
+                            Console.WriteLine($"Failed to load library: " + filepath);
+                            Console.WriteLine($"dlopen exception: " + ex.GetFullErrorMessage());
+                        }
+                        dlopen2(filepath, RTLD_NOW); 
+                    }
+                }
+                else
+                {
+                    extension = "dll";
+                    filepath = filepath.Replace("{prefix}", prefix).Replace("{ext}", extension);
+                    if (!File.Exists(filepath)) {
+                        Console.WriteLine($"No file found: " + filepath);
+                        return false;
+                    }
+                    LoadLibrary(filepath);
+                }
 #else
-                filepathPlusExt = filepath + ".dll";
-                if (!File.Exists(filepathPlusExt)) return false;
-                LoadLibrary(filepath + ".dll");
-                return true;
+                string bits = (Environment.Is64BitProcess ? "x64" : "x86");
+                var libname = "V8_Net_Proxy_{bits}.dll";
+                filepath = Path.Combine(rootPath, libname);
+                filepath = filepath.Replace("{bits}", bits);
+                if (!File.Exists(filepath)) {
+                    Console.WriteLine($"No file found: " + filepath);
+                    return false;
+                }
+                LoadLibrary(filepath);
 #endif
+                return true;
             }
-            catch { return false; }
+            catch (Exception ex) { 
+                if (Environment.UserInteractive) {
+                    Console.WriteLine($"Failed to load library: " + filepath);
+                    Console.WriteLine($"exception: " + ex.GetFullErrorMessage());
+                }
+                return false; 
+            }
         }
 
         /// <summary>
@@ -190,7 +239,7 @@ namespace V8.Net
 
                 // ... check for a bin folder for ASP.NET sites ...
 
-#if !NETSTANDARD // (NETSTANDARD is set for assemblies targeting .Net Standard; which supports BOTH .Net Core and .Net Full)
+#if !NETSTANDARD // (NETSTANDARD is set for assemblies processoring .Net Standard; which supports BOTH .Net Core and .Net Full)
                 _WebHostPath = HttpContext.Current?.Server.MapPath("~/bin");
 #else
                 _WebHostPath = HostingEnvironment?.ContentRootPath;

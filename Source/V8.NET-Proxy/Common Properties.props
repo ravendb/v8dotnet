@@ -2,7 +2,7 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ImportGroup Label="PropertySheets" />
   <PropertyGroup Label="UserMacros">
-    <V8_SRC>C:\ProgramData\Google\V8\src</V8_SRC>
+    <V8_SRC>/home/shlomo/work/projects</V8_SRC>
   </PropertyGroup>
   <PropertyGroup />
   <ItemDefinitionGroup />

@@ -24,12 +24,12 @@ Supports .Net Standard 2.0+ and .Net 461+.  A project in the repo also supports 
     <PackageReleaseNotes>Bugs fixed:
 1. Dynamic case from dynamic handle to managed object type.
 2. Switching contexts fails due to locked global handle (because global objects cannot be disposed, as they are part of the context itself).  Instead the global handle in the engine is replaced instead of being 'set' (which is what caused the system to try to dispose it).</PackageReleaseNotes>
-    <Version>1.1.8</Version>
+    <Version>1.1.9</Version>
     <Product>V8.Net</Product>
     <PackageId>V8.Net</PackageId>
     <PackageRequireLicenseAcceptance>False</PackageRequireLicenseAcceptance>
-    <AssemblyVersion>1.1.8.0</AssemblyVersion>
-    <FileVersion>1.1.8.0</FileVersion>
+    <AssemblyVersion>1.1.9.0</AssemblyVersion>
+    <FileVersion>1.1.9.0</FileVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
@@ -81,27 +81,18 @@ Supports .Net Standard 2.0+ and .Net 461+.  A project in the repo also supports 
     <Folder Include="runtimes\win10-x86\native\" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
-    <Content Include="..\bin\Debug\V8_Net_Proxy_x64.*">
-      <Link>runtimes\win10-x64\native\%(Filename)%(Extension)</Link>
+  <ItemGroup Condition="'$(Platform)'=='AnyCPU'">
+    <!--Content Include="..\bin\netstandard\$(Configuration)\*V8_Net_Proxy_*">
+      <Link>runtimes\win10-x64\native\%(Filename)%(Extension)</Link-->
       <!--<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>-->
-    </Content>
-    <Content Include="..\bin\Debug\V8_Net_Proxy_x86.*">
-      <Link>runtimes\win10-x86\native\%(Filename)%(Extension)</Link>
-      <!--<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>-->
-    </Content>
+    <!--/Content-->
   </ItemGroup>
 
-  <ItemGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
-    <Content Include="..\bin\Debug\V8_Net_Proxy_x64.dll">
+  <!--ItemGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <Content Include="..\bin\netstandard\Release\*V8_Net_Proxy_*">
       <Link>runtimes\win10-x64\native\%(Filename)%(Extension)</Link>
-      <!--<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>-->
     </Content>
-    <Content Include="..\bin\Debug\V8_Net_Proxy_x86.dll">
-      <Link>runtimes\win10-x86\native\%(Filename)%(Extension)</Link>
-      <!--<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>-->
-    </Content>
-  </ItemGroup>
+  </ItemGroup-->
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="2.2.0" />
@@ -143,7 +134,7 @@ Supports .Net Standard 2.0+ and .Net 461+.  A project in the repo also supports 
 
   <Target Name="CopyNativeFiles" AfterTargets="AfterBuild">
     <ItemGroup>
-      <NativeFiles Include="..\bin\$(Configuration)\V8_Net_Proxy_x*.*" />
+      <NativeFiles Include="..\bin\netstandard\$(Configuration)\*V8_Net_Proxy_*" />
     </ItemGroup>
     <Message Text="Copying native files ..." Importance="High" />
     <Copy SourceFiles="@(NativeFiles)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
@@ -152,16 +143,16 @@ Supports .Net Standard 2.0+ and .Net 461+.  A project in the repo also supports 
   
   <Target Name="CopyNativeFilesOnPublish" AfterTargets="Publish">
     <ItemGroup>
-      <NativeFiles Include="..\bin\$(Configuration)\V8_Net_Proxy_x*.*" />
+      <NativeFiles Include="..\bin\netstandard\$(Configuration)\*V8_Net_Proxy_*" />
     </ItemGroup>
     <Message Text="Copying native files for publish ..." Importance="High" />
     <Copy SourceFiles="@(NativeFiles)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
     <Message Text="Done copying native files for publish." Importance="High" />
   </Target>
 
-  <Target Name="PushPackageToLocal" AfterTargets="Pack">
+  <!--Target Name="PushPackageToLocal" AfterTargets="Pack">
     <Exec Command="dotnet nuget push &quot;$(MSBuildProjectDirectory)\..\bin\netstandard\$(Configuration)\$(AssemblyName).$(Version).nupkg&quot; -s &quot;C:\Data\Visual Studio\Nuget Server\$(Configuration)&quot;" />
-  </Target>
+  </Target-->
 
   <!--<Target Name="CopyNativeFiles" DependsOnTargets="CopyFilesToOutputDirectory">
     <Message Text="Should run before build" Importance="High" />

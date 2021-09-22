@@ -1,0 +1,107 @@
+{
+  "version": 3,
+  "targets": {
+    ".NETFramework,Version=v4.0": {
+      "GCCBuildTargets/1.19.325.5": {
+        "type": "package",
+        "build": {
+          "build/GCCBuildTargets.targets": {}
+        }
+      }
+    },
+    ".NETFramework,Version=v4.0/win": {
+      "GCCBuildTargets/1.19.325.5": {
+        "type": "package",
+        "build": {
+          "build/GCCBuildTargets.targets": {}
+        }
+      }
+    },
+    ".NETFramework,Version=v4.0/win-x64": {
+      "GCCBuildTargets/1.19.325.5": {
+        "type": "package",
+        "build": {
+          "build/GCCBuildTargets.targets": {}
+        }
+      }
+    },
+    ".NETFramework,Version=v4.0/win-x86": {
+      "GCCBuildTargets/1.19.325.5": {
+        "type": "package",
+        "build": {
+          "build/GCCBuildTargets.targets": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "GCCBuildTargets/1.19.325.5": {
+      "sha512": "OBcWfbDjVG/31BGLR0SltltgrS/DOzxOaDAaCOGEYtBzdpgISt39DdvhSBqmXZcFuqnRI8oL9k1yiNBDjrgUmw==",
+      "type": "package",
+      "path": "gccbuildtargets/1.19.325.5",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "build/DebuggerSupport.targets",
+        "build/GCCBuild.CppClean.targets",
+        "build/GCCBuildTargets.targets",
+        "build/Microsoft.Cpp.props",
+        "build/Microsoft.Cpp.targets",
+        "gccbuildtargets.1.19.325.5.nupkg.sha512",
+        "gccbuildtargets.nuspec",
+        "lib/netstandard2.0/GCCBuild.dll",
+        "lib/netstandard2.0/GCCBuild.pdb",
+        "lib/netstandard2.0/Microsoft.Build.Framework.dll",
+        "lib/netstandard2.0/Microsoft.Build.Utilities.Core.dll"
+      ]
+    }
+  },
+  "projectFileDependencyGroups": {
+    "": [
+      "GCCBuildTargets >= 1.*"
+    ],
+    ".NETFramework,Version=v4.0": []
+  },
+  "packageFolders": {
+    "/root/.nuget/packages/": {}
+  },
+  "project": {
+    "restore": {
+      "projectUniqueName": "/home/shlomo/work/projects/v8dotnet/Source/V8.NET-Proxy/V8.Net-Proxy-x64.vcxproj",
+      "projectName": "V8.Net-Proxy-x64",
+      "projectPath": "/home/shlomo/work/projects/v8dotnet/Source/V8.NET-Proxy/V8.Net-Proxy-x64.vcxproj",
+      "projectJsonPath": "/home/shlomo/work/projects/v8dotnet/Source/V8.NET-Proxy/project.json",
+      "packagesPath": "/root/.nuget/packages/",
+      "projectStyle": "ProjectJson",
+      "validateRuntimeAssets": true,
+      "configFilePaths": [
+        "/root/.nuget/NuGet/NuGet.Config"
+      ],
+      "sources": {
+        "https://api.nuget.org/v3/index.json": {}
+      },
+      "frameworks": {
+        "net40": {
+          "projectReferences": {}
+        }
+      }
+    },
+    "dependencies": {
+      "GCCBuildTargets": "[1.*, )"
+    },
+    "frameworks": {
+      "net40": {}
+    },
+    "runtimes": {
+      "win": {
+        "#import": []
+      },
+      "win-x64": {
+        "#import": []
+      },
+      "win-x86": {
+        "#import": []
+      }
+    }
+  }
+}

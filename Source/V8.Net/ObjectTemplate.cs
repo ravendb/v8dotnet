@@ -124,9 +124,13 @@ namespace V8.Net
                 var obj = _Engine._GetExistingObject(info.ManagedObjectID);
                 if (obj == null)
                     return null;
+
                 var mo = obj as IV8ManagedObject;
-                var result = mo != null ? mo.NamedPropertyGetter(ref propertyName) : null;
-                return result;
+                if (mo == null)
+                    return null;
+
+                using (var jsRes = mo.NamedPropertyGetter(ref propertyName).KeepAlive()) 
+                    return jsRes;
             }
             catch (Exception ex)
             {
@@ -138,13 +142,21 @@ namespace V8.Net
         {
             try
             {
-                InternalHandle hValue = value;
                 var obj = _Engine._GetExistingObject(info.ManagedObjectID);
                 if (obj == null)
                     return null;
+
                 var mo = obj as IV8ManagedObject;
-                var result = mo != null ? mo.NamedPropertySetter(ref propertyName, hValue, V8PropertyAttributes.Undefined) : null;
-                return result;
+                if (mo == null)
+                    return null;
+
+                var hValue = new InternalHandle(value, true);
+                hValue.IsToBeKeptAlive = false;
+                using (hValue) 
+                {
+                    using (var jsRes = mo.NamedPropertySetter(ref propertyName, hValue, V8PropertyAttributes.Undefined).KeepAlive())
+                        return jsRes;
+                }
             }
             catch (Exception ex)
             {
@@ -160,7 +172,7 @@ namespace V8.Net
                 if (obj == null)
                     return V8PropertyAttributes.Undefined;
                 var mo = obj as IV8ManagedObject;
-                var result = mo != null ? mo.NamedPropertyQuery(ref propertyName) : null;
+                var result = mo?.NamedPropertyQuery(ref propertyName);
                 if (result != null) return result.Value;
                 else return V8PropertyAttributes.Undefined; // (not intercepted, so perform default action)
             }
@@ -178,7 +190,7 @@ namespace V8.Net
                 if (obj == null)
                     return -1;
                 var mo = obj as IV8ManagedObject;
-                var result = mo != null ? mo.NamedPropertyDeleter(ref propertyName) : null;
+                var result = mo?.NamedPropertyDeleter(ref propertyName);
                 if (result != null) return result.Value ? 1 : 0;
                 else return -1; // (not intercepted, so perform default action)
             }
@@ -196,7 +208,8 @@ namespace V8.Net
                 if (obj == null)
                     return null;
                 var mo = obj as IV8ManagedObject;
-                return mo != null ? mo.NamedPropertyEnumerator() : null;
+                using (var result = mo?.NamedPropertyEnumerator().KeepAlive() ?? InternalHandle.Empty)
+                    return result;
             }
             catch (Exception ex)
             {
@@ -213,9 +226,13 @@ namespace V8.Net
                 var obj = _Engine._GetExistingObject(info.ManagedObjectID);
                 if (obj == null)
                     return null;
+
                 var mo = obj as IV8ManagedObject;
-                var result = mo != null ? mo.IndexedPropertyGetter(index) : null;
-                return result;
+                if (mo == null)
+                    return null;
+
+                using (var jsRes = mo.IndexedPropertyGetter(index).KeepAlive())
+                    return jsRes;
             }
             catch (Exception ex)
             {
@@ -227,13 +244,21 @@ namespace V8.Net
         {
             try
             {
-                InternalHandle hValue = value;
                 var obj = _Engine._GetExistingObject(info.ManagedObjectID);
                 if (obj == null)
                     return null;
+
                 var mo = obj as IV8ManagedObject;
-                var result = mo != null ? mo.IndexedPropertySetter(index, hValue) : null;
-                return result;
+                if (mo == null)
+                    return null;
+
+                var hValue = new InternalHandle(value, true);
+                hValue.IsToBeKeptAlive = false;
+                using (hValue) 
+                {
+                    using (var jsRes = mo.IndexedPropertySetter(index, hValue).KeepAlive())
+                        return jsRes;
+                }
             }
             catch (Exception ex)
             {
@@ -249,7 +274,7 @@ namespace V8.Net
                 if (obj == null)
                     return V8PropertyAttributes.Undefined;
                 var mo = obj as IV8ManagedObject;
-                var result = mo != null ? mo.IndexedPropertyQuery(index) : null;
+                var result = mo?.IndexedPropertyQuery(index);
                 if (result != null) return result.Value;
                 else return V8PropertyAttributes.Undefined; // (not intercepted, so perform default action)
             }
@@ -267,7 +292,7 @@ namespace V8.Net
                 if (obj == null)
                     return -1;
                 var mo = obj as IV8ManagedObject;
-                var result = mo != null ? mo.IndexedPropertyDeleter(index) : null;
+                var result = mo?.IndexedPropertyDeleter(index);
                 if (result != null) return result.Value ? 1 : 0;
                 else return -1; // (not intercepted, so perform default action)
             }
@@ -285,7 +310,8 @@ namespace V8.Net
                 if (obj == null)
                     return null;
                 var mo = obj as IV8ManagedObject;
-                return mo != null ? mo.IndexedPropertyEnumerator() : null;
+                using (var result = mo?.IndexedPropertyEnumerator().KeepAlive() ?? InternalHandle.Empty)
+                    return result;
             }
             catch (Exception ex)
             {
@@ -473,13 +499,13 @@ namespace V8.Net
 
             try
             {
-                obj._Handle.Set(V8NetProxy.CreateObjectFromTemplate(_NativeObjectTemplateProxy, obj.ID));
+                obj._Handle = new InternalHandle(V8NetProxy.CreateObjectFromTemplate(_NativeObjectTemplateProxy, obj.ID), true);
                 // (note: setting '_NativeObject' also updates it's '_ManagedObject' field if necessary.
             }
             catch (Exception ex)
             {
                 // ... something went wrong, so remove the new managed object ...
-                _Engine._RemoveObjectWeakReference(obj.ID);
+                _Engine._RemoveObjectRootableReference(obj.ID);
                 throw ex;
             }
 

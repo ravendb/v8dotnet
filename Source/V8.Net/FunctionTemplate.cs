@@ -194,7 +194,8 @@ namespace V8.Net
                     + " only supports interceptor hooks for objects generated from ObjectTemplate instances.  You will need to first derive/implement from V8NativeObject/IV8NativeObject"
                     + " for your custom object(s), or rewrite your object to use V8NativeObject directly instead and use the 'SetAccessor()' handle method.");
 
-            return result;
+            using (result.KeepAlive())
+                return result;
         }
 
         // --------------------------------------------------------------------------------------------------------------------
@@ -245,7 +246,8 @@ namespace V8.Net
             // ... get the function's prototype object, wrap it, and give it to the new function object ...
             // (note: this is a special case, because the function object auto generates the prototype object natively using an existing object template)
 
-            func._Prototype.Set(V8NetProxy.GetObjectPrototype(func._Handle));
+            var funcProto = V8NetProxy.GetObjectPrototype(func._Handle);
+            func._Prototype.Set(funcProto);
 
             lock (_FunctionsByType)
             {
@@ -334,7 +336,7 @@ namespace V8.Net
             catch (Exception ex)
             {
                 // ... something went wrong, so remove the new managed object ...
-                _Engine._RemoveObjectWeakReference(obj.ID);
+                _Engine._RemoveObjectRootableReference(obj.ID);
                 throw ex;
             }
             finally

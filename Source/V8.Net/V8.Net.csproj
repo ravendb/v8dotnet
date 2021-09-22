@@ -153,12 +153,10 @@ REM  del "$(TargetDir)\x86\V8.Net.SharedTypes.*"
        Other similar extension points exist, see Microsoft.Common.targets.
   <Target Name="BeforeBuild">
   </Target>
-  <Target Name="AfterBuild">
-  </Target>
   -->
   <Target Name="AfterBuild">
     <ItemGroup>
-      <Content Include="..\bin\Debug\V8_Net_Proxy_x*.dll">
+      <Content Include="..\bin\netstandard\Debug\*V8_Net_Proxy_*">
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </Content>
     </ItemGroup>

@@ -1685,8 +1685,10 @@ namespace V8.Net
         /// <param name="binder"> The binder. </param>
         /// <param name="obj"> An object instance for the object binder (required). </param>
         /// <returns> An ObjectBinder. </returns>
-        public ObjectBinder AssociatedBinder(ObjectBinder binder, object obj)
+        public ObjectBinder AssociatedBinder(ObjectBinder binder, object obj, bool keepAlive = true)
         {
+            bool isLocked = binder._.IsLocked; // for debugging
+
             if (obj == null) throw new ArgumentNullException("obj");
 
             if (binder.Object != obj)
@@ -1696,7 +1698,10 @@ namespace V8.Net
                     throw new InvalidOperationException("'obj' instance of type '" + objType.Name + "' is not compatible with type '" + BoundType.Name + "' as represented by this type binder.");
 
                 binder.Object = obj; // (this updates the object type and type binder references automatically as well)
-                binder.InternalHandle.KeepAlive();
+                if (keepAlive) {
+                    binder.InternalHandle.KeepAlive();
+                }
+                isLocked = binder._.IsLocked; // for debugging
 
                 var typeBinder = this;
                 while (typeBinder != null)
@@ -1726,11 +1731,11 @@ namespace V8.Net
         ///     (Optional) If true (default) then 'IV8NativeObject.Initialize()' is called on the created object before returning.
         /// </param>
         /// <returns> A new 'ObjectBinder' instance you can use when setting properties to the specified object instance. </returns>
-        public T CreateObjectBinder<T, TInstance>(TInstance obj, bool initializeBinder = true)
+        public T CreateObjectBinder<T, TInstance>(TInstance obj, bool initializeBinder = true, bool keepAlive = true)
             where T : ObjectBinder, new()
             where TInstance : class
         {
-            return (T)AssociatedBinder(InstanceTemplate.CreateObject<T>(initializeBinder), obj);
+            return (T)AssociatedBinder(InstanceTemplate.CreateObject<T>(initializeBinder), obj, keepAlive: keepAlive);
         }
 
         /// <summary>
@@ -1739,20 +1744,20 @@ namespace V8.Net
         /// </summary>
         /// <param name="obj"> An object instance for the object binder (required). </param>
         /// <returns> A new 'ObjectBinder' instance you can use when setting properties to the specified object instance. </returns>
-        public ObjectBinder CreateObjectBinder(object obj) // (made this internal to prevent user handlers from calling it)
+        public ObjectBinder CreateObjectBinder(object obj, bool keepAlive = true) // (made this internal to prevent user handlers from calling it)
         {
-            return CreateObjectBinder<ObjectBinder, object>(obj, true);
+            return CreateObjectBinder<ObjectBinder, object>(obj, keepAlive: keepAlive);
         }
 
         // (made this internal to prevent user handlers from calling it - which could cause a stack overflow [cyclical calling])
         /// <param name="initializeBinder">If true (default) then 'IV8NativeObject.Initialize()' is called on the created object before returning.</param>
-        internal ObjectBinder _CreateObjectBinderForInstance(object obj, bool initializeBinder = true)
+        internal ObjectBinder _CreateObjectBinderForInstance(object obj, bool initializeBinder = true, bool keepAlive = true)
         {
             var binder = OnGetObjectBinder?.Invoke(this, obj);
             if (binder != null)
-                return AssociatedBinder(binder, obj);
+                return AssociatedBinder(binder, obj, keepAlive: keepAlive);
             else
-                return CreateObjectBinder<ObjectBinder, object>(obj, initializeBinder);
+                return CreateObjectBinder<ObjectBinder, object>(obj, initializeBinder, keepAlive: keepAlive);
         }
 
         // --------------------------------------------------------------------------------------------------------------------
@@ -1839,6 +1844,15 @@ namespace V8.Net
         }
         internal object _Object;
 
+        public override void OnDispose()
+        {
+            if (_Object is IDisposable r) {
+                r.Dispose();
+            }
+            _Object = null;
+
+            base.OnDispose();
+        }
         /// <summary>
         ///     Gets or sets the type of the object that this binder will work with. Once this is set it cannot be changed.
         /// </summary>
@@ -1986,7 +2000,7 @@ namespace V8.Net
                             var getter = memberDetails.Getter;
                             if (getter == null)
                             {
-                                // .. first time access, create a binding ...
+                                // .. first ticlass ObjectBinder :e access, create a binding ...
                                 TypeBinder._GetBindingForDataMember(memberDetails, out getter, out NativeSetterAccessor setter);
                                 memberDetails.Getter = getter;
                                 memberDetails.Setter = setter;

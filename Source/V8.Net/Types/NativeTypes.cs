@@ -152,6 +152,7 @@ namespace V8.Net
                     case JSValueType.Int32: return (Int32)V8Integer;
                     case JSValueType.Number: return V8Number;
                     case JSValueType.NumberObject: return V8Number; // TODO: Test this.
+                    case JSValueType.Date: return V8Number;
                     default: return V8String != null ? Marshal.PtrToStringUni((IntPtr)V8String) : null;
                         // TODO: Detect arrays and return them also.
                 }

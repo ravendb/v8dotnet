@@ -298,11 +298,11 @@ namespace V8.Net
 
                 // ... allow all objects to be finalized by the GC ...
 
-                WeakReference weakRef;
+                RootableReference rref;
                 V8NativeObject obj;
 
                 for (var i = 0; i < _Objects.Count; i++)
-                    if ((weakRef = _Objects[i]) != null && (obj = (V8NativeObject)weakRef.Target) != null)
+                    if ((rref = _Objects[i]) != null && (obj = (V8NativeObject)rref.Target) != null)
                     {
                         obj.OnDispose();
                         obj._ID = null;
@@ -327,6 +327,7 @@ namespace V8.Net
         /// Returns true once this engine has been disposed.
         /// </summary>
         public bool IsDisposed { get { return _NativeV8EngineProxy == null; } }
+
 
         // --------------------------------------------------------------------------------------------------------------------
 
@@ -386,8 +387,7 @@ namespace V8.Net
         {
             if (handleProxy->_ObjectID >= 0)
             {
-                if (_UnrootObject(handleProxy->_ObjectID))
-                    return false; // (prevent the V8 GC from disposing the handle; the managed object will now dispose of this handle when the MANAGED GC is ready)
+                return _UnrootObject(handleProxy->_ObjectID); // (prevent the V8 GC from disposing the handle; the managed object will now dispose of this handle when the MANAGED GC is ready)
             }
             return true; // (don't know what this is now, so allow the handle to be disposed)
         }
@@ -530,7 +530,7 @@ namespace V8.Net
             if (throwExceptionOnError)
                 result.ThrowOnError();
 
-            return result.KeepTrack();
+            return result; //.KeepTrack();
         }
 
         /// <summary>
@@ -798,7 +798,7 @@ namespace V8.Net
             catch (Exception ex)
             {
                 // ... something went wrong, so remove the new managed object ...
-                _RemoveObjectWeakReference(obj.ID);
+                _RemoveObjectRootableReference(obj.ID);
                 throw ex;
             }
 
@@ -814,7 +814,7 @@ namespace V8.Net
         public InternalHandle CreateObject()
         {
             //x if (objectID > -2) throw new InvalidOperationException("Object IDs must be <= -2.");
-            return (Handle)V8NetProxy.CreateObject(_NativeV8EngineProxy, -1); // TODO: Consider associating a user-defined string value to store instead.
+            return new InternalHandle(V8NetProxy.CreateObject(_NativeV8EngineProxy, -1), true); // TODO: Consider associating a user-defined string value to store instead.
         }
 
         /// <summary>

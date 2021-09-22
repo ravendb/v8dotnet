@@ -3,6 +3,11 @@
 
 #include <exception>
 #include <vector>
+
+#if DEBUG
+#include <algorithm>
+#endif
+
 #if (_MSC_PLATFORM_TOOLSET >= 110)
 #include <mutex>
 #endif
@@ -27,13 +32,14 @@
 #define REALLOC_MANAGED_MEM(ptr, size) GlobalReAlloc(ptr, size, GMEM_MOVEABLE)
 #define FREE_MANAGED_MEM(ptr) { GlobalFree(ptr); ptr = nullptr; }
 //??#define ALLOC_MANAGED_STRING(size) CoTaskMemAlloc(GMEM_FIXED|GMEM_ZEROINIT, size)
-#define FREE_MARSHALLED_STRING(ptr) { CoTaskMemFree(ptr); ptr = nullptr; }
+//#define FREE_MARSHALLED_STRING(ptr) { CoTaskMemFree(ptr); ptr = nullptr; }
 #define STDCALL __stdcall
 #else
 #include <glib.h>
-#define ALLOC_MANAGED_MEM(size) g_malloc(size)
-#define FREE_MANAGED_MEM(ptr) g_free(ptr)
-#define STDCALL __stdcall
+#define ALLOC_MANAGED_MEM(size) malloc(size)
+#define REALLOC_MANAGED_MEM(ptr, size) realloc(ptr, size)
+#define FREE_MANAGED_MEM(ptr) free(ptr)
+#define STDCALL 
 #endif
 
 //(make static instead) #define USING_V8_SHARED 1
@@ -42,24 +48,46 @@
 #include "libplatform/libplatform.h"
 #include "v8.h"
 
-#pragma comment(lib, "v8_base_0.lib")
+#include <functional>
+#include <libplatform/libplatform.h>
+#include "Inspector.h"
+#include "v8_inspector_listener_impl.h"
+
+#if _WIN32 || _WIN64
+#pragma comment(lib, "v8_monolith.lib")
+/*#pragma comment(lib, "v8_base_0.lib")
 #pragma comment(lib, "v8_base_1.lib")
 #pragma comment(lib, "v8_snapshot.lib")
 #pragma comment(lib, "v8_nosnapshot.lib")
 #pragma comment(lib, "v8_libbase.lib")
 #pragma comment(lib, "v8_libplatform.lib")
 #pragma comment(lib, "v8_libsampler.lib")
-#pragma comment(lib, "third_party/icu/icuuc.lib")
+*/#pragma comment(lib, "third_party/icu/icuuc.lib")
 #pragma comment(lib, "third_party/icu/icui18n.lib")
 #pragma comment(lib, "src/inspector/inspector.lib")
 
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "dbghelp.lib")
 #pragma comment(lib, "shlwapi.lib")
+#endif
 
 using namespace v8;
 
-#define EXPORT __declspec(dllexport)
+//#define EXPORT __declspec(dllexport)
+#if defined(_MSC_VER__V8_NET)
+    //  Microsoft 
+    #define EXPORT __declspec(dllexport)
+    #define IMPORT __declspec(dllimport)
+#elif defined(__GNUC__)
+    //  GCC
+    #define EXPORT __attribute__((visibility("default")))
+    #define IMPORT
+#else
+    //  do nothing and hope for the best?
+    #define EXPORT
+    #define IMPORT
+    #pragma warning Unknown dynamic link import/export semantics.
+#endif
 
 // ========================================================================================================================
 
@@ -86,7 +114,7 @@ template <class T> struct CopyablePersistent {
 	CopyablePersistent() { }
 	CopyablePersistent(CopyablePersistent &p) { Value = p.Value; }
 	// Local<T> must get converted to a persistent type before it goes out of scope and gets disposed within the calling scope.
-	CopyablePersistent(Local<T> &h) { Value = v8::Persistent<T, CopyablePersistentTraits<T>>(Isolate::GetCurrent(), h); }
+	CopyablePersistent(Local<T> h) { Value = v8::Persistent<T, CopyablePersistentTraits<T>>(Isolate::GetCurrent(), h); }
 	~CopyablePersistent() { if (!Value.IsEmpty()) Value.Reset(); }
 
 	// Just to support the = operator as well as the copy constructor.
@@ -105,30 +133,58 @@ template <class T> struct CopyablePersistent {
 	void MarkIndependent() { return Value.MarkIndependent(); }
 	void MarkPartiallyDependent() { return Value.MarkPartiallyDependent(); }
 
-	template <class S> Local<S> As() { return Handle().As<S>(); }
+	template <class S> Local<S> As() { return Local<S>::Cast(Handle()); } //Handle().As<S>(); }
 };
 
 #define byte unsigned char
 #define int32_t std::int32_t
 #define int64_t std::int64_t
-#define vector std::vector
+//#define vector std::vector
 #define exception std::exception
+#define runtime_error std::runtime_error
 #define recursive_mutex std::recursive_mutex
 #define lock_guard std::lock_guard
+
+template <class S> S ToThrow(Maybe<S> valueM, std::string msg) 
+{
+	S value;
+	if (!valueM.To(&value))
+		throw runtime_error(msg);
+	return value; 
+}
+
+template <class S> S ToThrow(Maybe<S> valueM) 
+{
+	return ToThrow(valueM, "Maybe is empty.");
+}
+
+template <class S> Local<S> ToLocalThrow(MaybeLocal<S> valueML, std::string msg) 
+{
+	Local<S> valueL;
+	if (!valueML.ToLocal(&valueL))
+		throw runtime_error(msg);
+	return valueL; 
+}
+
+template <class S> Local<S> ToLocalThrow(MaybeLocal<S> valueML) 
+{
+	return ToLocalThrow(valueML, "MaybeLocal is empty.");
+}
+
 
 #define V8Undefined v8::Undefined(Isolate::GetCurrent())
 #define V8Null v8::Null(Isolate::GetCurrent())
 #define NewNumber(value) Number::New(Isolate::GetCurrent(), value)
 #define NewInteger(value) Int32::New(Isolate::GetCurrent(), value)
 #define NewBool(value) Boolean::New(Isolate::GetCurrent(), value)
-#define NewSizedUString(str, len) String::NewFromTwoByte(Isolate::GetCurrent(), str, String::kNormalString, len)
-#define NewUString(str) String::NewFromTwoByte(Isolate::GetCurrent(), str, String::kNormalString)
+#define NewSizedUString(str, len) String::NewFromTwoByte(Isolate::GetCurrent(), str, NewStringType::kNormal, len)
+#define NewUString(str) String::NewFromTwoByte(Isolate::GetCurrent(), str, NewStringType::kNormal)
 #define NewName(str) NewUString(str)
-#define NewSizedString(str, len) String::NewFromUtf8(Isolate::GetCurrent(), str, String::kNormalString, len)
-#define NewString(str) String::NewFromUtf8(Isolate::GetCurrent(), str, String::kNormalString)
-#define NewPrivateString(str) Private::New(Isolate::GetCurrent(), NewString(str))
+#define NewSizedString(str, len) String::NewFromUtf8(Isolate::GetCurrent(), str, NewStringType::kNormal, len)
+#define NewString(str) String::NewFromUtf8(Isolate::GetCurrent(), str, NewStringType::kNormal)
+#define NewPrivateString(str) Private::New(Isolate::GetCurrent(), ToLocalThrow(NewString(str)))
 #define NewObject() Object::New(Isolate::GetCurrent())
-#define NewDate(ctx, ms) Date::New(ctx, ms).ToLocalChecked()
+#define NewDate(ctx, ms) ToLocalThrow(Date::New(ctx, ms))
 #define NewArray(len) Array::New(Isolate::GetCurrent(), len)
 #define NewObjectTemplate() ObjectTemplate::New(Isolate::GetCurrent())
 #define NewFunctionTemplate(callback, data) FunctionTemplate::New(Isolate::GetCurrent(), callback, data)
@@ -717,7 +773,7 @@ protected:
 	// Why? If not, then we need to keep track of handles in some form of collection, list, or array. Since handles are a core part of values being handed
 	// around, this would greatly impact performance. Since it is assumed that engines will not be created and disposed in large numbers, if at all, a
 	// record of disposed engines is kept so handles can quickly check if they are ok to be disposed (note: managed handles are disposed on a GC thread!).
-	static vector<bool> _DisposedEngines;
+	static std::vector<bool> _DisposedEngines;
 	static int32_t _NextEngineID;
 
 	int32_t _NextNonTemplateObjectID;
@@ -729,20 +785,23 @@ protected:
 	CopyablePersistent<v8::Object> _GlobalObject; // (taken from the context)
 	ManagedV8GarbageCollectionRequestCallback _ManagedV8GarbageCollectionRequestCallback;
 
-	vector<_StringItem> _Strings; // An array (cache) of string buffers to reuse when marshalling strings.
+	const static int32_t _InspectorPort = 9000;
+	std::unique_ptr<Inspector> _Inspector = nullptr;
 
-	vector<HandleProxy*> _Handles; // An array of all allocated handles for this engine proxy.
-	vector<HandleProxy*> _HandlesPendingDisposal; // An array of handles for this engine proxy that are ready to be disposed.
-	vector<int> _DisposedHandles; // An array of handles (by ID [index]) that have been disposed. The managed GC thread uses this, so beware!
+	std::vector<_StringItem> _Strings; // An array (cache) of string buffers to reuse when marshalling strings.
+
+	std::vector<HandleProxy*> _Handles; // An array of all allocated handles for this engine proxy.
+	std::vector<HandleProxy*> _HandlesPendingDisposal; // An array of handles for this engine proxy that are ready to be disposed.
+	std::vector<int> _DisposedHandles; // An array of handles (by ID [index]) that have been disposed. The managed GC thread uses this, so beware!
 	std::mutex _DisposingHandleMutex; // A mutex used to prevent access to the handle disposal queue system as a "critical section".  NO ACCESS TO THE V8 ENGINE IS ALLOWED FOR MANAGED GARBAGE COLLECTION IN THIS CRITICAL SECTION.
 	recursive_mutex _HandleSystemMutex; // A mutex used to prevent access to the handle system as a "critical section".  NO ACCESS TO THE V8 ENGINE IS ALLOWED FOR MANAGED GARBAGE COLLECTION IN THIS CRITICAL SECTION.
 
-	vector<HandleProxy*> _HandlesToBeMadeWeak;
+	std::vector<HandleProxy*> _HandlesToBeMadeWeak;
 	recursive_mutex _MakeWeakQueueMutex;
-	vector<HandleProxy*> _HandlesToBeMadeStrong;
+	std::vector<HandleProxy*> _HandlesToBeMadeStrong;
 	recursive_mutex _MakeStrongQueueMutex;
 
-	vector<HandleProxy*> _Objects; // An array of handle references by object ID. This allows pulling an already existing proxy handle for an object without having to allocate a new one.
+	std::vector<HandleProxy*> _Objects; // An array of handle references by object ID. This allows pulling an already existing proxy handle for an object without having to allocate a new one.
 
 	bool _IsExecutingScript; // True if the engine is executing a script.  This is used abort entering a locker on idle notifications while scripts are running.
 	int _InCallbackScope; // >0 if currently in a scope that is/will call back to the manage side. This helps to notify when a callback to the managed side causes another call back into the engine.

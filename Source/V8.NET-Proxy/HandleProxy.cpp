@@ -1,4 +1,5 @@
 #include "ProxyTypes.h"
+#include <string.h>
 
 // ------------------------------------------------------------------------------------------------------------------------
 
@@ -109,7 +110,7 @@ void HandleProxy::_ClearHandleValue()
 	_Value.Dispose();
 	_Type = JSV_Uninitialized;
 	if (_Handle.IsWeak())
-		throw exception("HandleProxy::_ClearHandleValue(): Assertion failed - tried to clear a handle that is still in a weak state.");
+		throw runtime_error("HandleProxy::_ClearHandleValue(): Assertion failed - tried to clear a handle that is still in a weak state.");
 }
 
 HandleProxy* HandleProxy::SetHandle(v8::Handle<v8::Script> handle)
@@ -253,16 +254,17 @@ int32_t HandleProxy::SetManagedObjectID(int32_t id)
 	{
 		// ... use "duck typing" to determine if the handle is a valid TypeInfo object ...
 		auto obj = _Handle.As<Object>();
-		auto hTypeID = obj->Get(_EngineProxy->Context(), NewString("$__TypeID"));
-		if (!hTypeID.IsEmpty())
+
+		auto hTypeIdML = obj->Get(_EngineProxy->Context(), ToLocalThrow(NewString("$__TypeID")));
+		Local<Value> hTypeIdL;
+		if (!hTypeIdML.ToLocal(&hTypeIdL))
 		{
-			auto lhTypeID = hTypeID.ToLocalChecked();
-			if (lhTypeID->IsNumber() || lhTypeID->IsInt32())
+			if (hTypeIdL->IsNumber() || hTypeIdL->IsInt32())
 			{
-				int32_t typeID = lhTypeID->IsNumber() ? lhTypeID->Int32Value(_EngineProxy->Context()).FromJust() : (int32_t)lhTypeID->NumberValue(_EngineProxy->Context()).FromJust();
-				if (obj->Has(_EngineProxy->Context(), NewString("$__Value")).FromMaybe(false))
+				int32_t value = hTypeIdL->IsNumber() ? hTypeIdL->Int32Value(_EngineProxy->Context()).FromJust() : (int32_t)hTypeIdL->NumberValue(_EngineProxy->Context()).FromJust();
+				if (obj->Has(_EngineProxy->Context(), ToLocalThrow(NewString("$__Value"))).FromMaybe(false))
 				{
-					_CLRTypeID = typeID;
+					_CLRTypeID = value;
 				}
 			}
 		}
@@ -288,7 +290,7 @@ int32_t HandleProxy::GetManagedObjectID()
 // If the given handle is an object, this will attempt to pull the managed side object ID, or -1 otherwise.
 int32_t HandleProxy::GetManagedObjectID(v8::Handle<Value> h)
 {
-	auto id = -1;
+	int32_t id = -1;
 
 	if (!h.IsEmpty() && h->IsObject())
 	{
@@ -305,13 +307,13 @@ int32_t HandleProxy::GetManagedObjectID(v8::Handle<Value> h)
 		}
 		else
 		{
-			auto priv_sym = Private::ForApi(Isolate::GetCurrent(), NewString("ManagedObjectID")); // TODO: Better way to do this?
-			auto handle = obj->GetPrivate(Isolate::GetCurrent()->GetEnteredContext(), priv_sym);
-			if (!handle.IsEmpty())
+			auto priv_sym = Private::ForApi(Isolate::GetCurrent(), ToLocalThrow(NewString("$ManagedObjectID"))); // TODO: Better way to do this?
+			auto handleML = obj->GetPrivate(Isolate::GetCurrent()->GetEnteredOrMicrotaskContext(), priv_sym);
+			Local<Value> handleL;
+			if (!handleML.ToLocal(&handleL))
 			{
-				auto value = handle.ToLocalChecked();
-				if (!value.IsEmpty() && value->IsInt32())
-					id = (int32_t)value->Int32Value(Isolate::GetCurrent()->GetEnteredContext()).ToChecked();
+				if (!handleL.IsEmpty() && handleL->IsInt32())
+					handleL->Int32Value(Isolate::GetCurrent()->GetEnteredOrMicrotaskContext()).To(&id);
 			}
 		}
 	}
@@ -389,12 +391,12 @@ void HandleProxy::UpdateValue()
 		}
 		case JSV_Bool:
 		{
-			_Value.V8Boolean = _Handle->BooleanValue(_EngineProxy->Context()).FromJust();
+			_Value.V8Boolean = _Handle->BooleanValue(_EngineProxy->Context()->GetIsolate());
 			break;
 		}
 		case JSV_BoolObject:
 		{
-			_Value.V8Boolean = _Handle->BooleanValue(_EngineProxy->Context()).FromJust();
+			_Value.V8Boolean = _Handle->BooleanValue(_EngineProxy->Context()->GetIsolate());
 			break;
 		}
 		case JSV_Int32:
@@ -428,8 +430,8 @@ void HandleProxy::UpdateValue()
 		}
 		case JSV_Date:
 		{
-			_Value.V8Number = _Handle->NumberValue(_EngineProxy->Context()).FromJust();
-			_Value.V8String = _StringItem(_EngineProxy, *_Handle.As<String>()).String;
+			_Value.V8Number = _Handle.As<Date>()->ValueOf(); // Date::Cast(*_Handle.Handle())->ValueOf(); //_Handle.As<Number>()->Value(); //_Handle->NumberValue(_EngineProxy->Context()).FromJust();
+			//_Value.V8String = _StringItem().String; //_StringItem(_EngineProxy, *_Handle.As<String>()).String;
 			break;
 		}
 		case JSV_Undefined:
@@ -440,8 +442,12 @@ void HandleProxy::UpdateValue()
 		}
 		default: // (by default, an "object" type is assumed (warning: this includes functions); however, we can't translate it (obviously), so we just return a reference to this handle proxy instead)
 		{
-			if (!_Handle.IsEmpty())
-				_Value.V8String = _StringItem(_EngineProxy, *_Handle->ToString(_EngineProxy->Isolate())).String;
+			if (!_Handle.IsEmpty()) {
+				auto resML = _Handle->ToString(_EngineProxy->Context());
+				Local<String> resL;
+				if (resML.ToLocal(&resL))
+					_Value.V8String = _StringItem(_EngineProxy, *resL).String;
+			}
 			break;
 		}
 	}

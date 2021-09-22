@@ -71,6 +71,17 @@ namespace V8.Net
         new public V8Engine Engine { get { return _Engine ?? (_Engine = _Handle.Engine); } }
         internal V8Engine _Engine;
 
+        public bool IsLocked;
+
+        public void SetReadyToDisposal()
+        {
+            IsLocked = false;
+        }
+        public virtual void OnEngineRootedStatusChange(bool isRooted)
+        {
+            return;
+        }
+
         new public V8NativeObject Object { get { return this; } }
 
         /// <summary>
@@ -243,6 +254,7 @@ namespace V8.Net
             _CreationStack = Environment.StackTrace;
 #endif
             _Proxy = this;
+            IsLocked = true;
         }
 
         public V8NativeObject(IV8NativeObject proxy)
@@ -289,7 +301,7 @@ namespace V8.Net
 
         public override void Dispose()
         {
-            _Dispose();
+            DisposeObject(false);
         }
 
         /// <summary>
@@ -311,7 +323,7 @@ namespace V8.Net
         /// <summary>
         ///     Returns true if disposed, and false if already disposed.
         /// </summary>
-        internal bool _Dispose() // WARNING: The worker thread may cause a V8 GC callback in its own thread!
+        public bool DisposeObject(bool fromInternalHandle = false) // WARNING: The worker thread may cause a V8 GC callback in its own thread!
         {
             if (!_Handle.IsEmpty)
             {
@@ -354,19 +366,23 @@ namespace V8.Net
 
                 // ... reset and dispose the handle ...
 
-                if (!_Handle.IsEmpty)
-                {
-                    _Handle.ObjectID = -1; // (resets the object ID on the native side [though this happens anyhow once cached], which also causes the reference to clear)
-                    // (MUST clear the object ID, else the handle will not get disposed [because '{Handle}.IsLocked' will return false])
-                    _Handle._Finalize(false);
+                //_Handle.ObjectID = -1; // (resets the object ID on the native side [though this happens anyhow once cached], which also causes the reference to clear)
+                // (MUST clear the object ID, else the handle will not get disposed [because '{Handle}.IsLocked' will return false])
+                if (!fromInternalHandle) {
+                    InternalHandle h = _Handle;
+                    _Handle = InternalHandle.Empty;
+                    h.ForceDispose(false, true);
                 }
 
-                if (_ID != null)
-                    engine._RemoveObjectWeakReference(_ID.Value);
+                var objectID = _ID != null ? _ID.Value : -1;
 
                 Template = null; // (note: this decrements a template counter, allowing the template object to be finally allowed to dispose)
                 _ID = null; // (also allows the GC finalizer to collect the object)
+        
+                if (objectID >= 0)
+                    engine._RemoveObjectRootableReference(objectID);
 
+                GC.SuppressFinalize(this); // added KSI
                 return true;
             }
 

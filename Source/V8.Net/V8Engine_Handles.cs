@@ -42,7 +42,39 @@ namespace V8.Net
         /// These are then passed on to the user callback method WITHOUT a handle tracker, and disposed automatically on return.
         /// This can save creating many unnecessary objects for the managed GC to deal with.
         /// </summary>
-        internal WeakReference[] _TrackerHandles = new WeakReference[1000];
+        internal CountedReference[] _TrackerHandles = new CountedReference[1000];
+
+
+        public bool Reset(Int32 handleID)
+        {
+            if (handleID > 0) {
+                var wref = GetCountedReference(handleID);
+                wref?.Reset();
+
+                if (handleID < _HandleProxies.Length) {
+                    _HandleProxies[handleID] = null;
+                }
+                return true;
+            }
+            return false;
+        }
+
+
+        public CountedReference GetCountedReference(Int32 handleID)
+        {
+            CountedReference wref = null;
+            if (handleID >= 0) {
+                /*if (handleID >= _TrackerHandles.Length && createIfMissing) {
+                    GetTrackableHandle(createIfMissing);
+                }*/
+                if (handleID < _TrackerHandles.Length) {
+                    wref = _TrackerHandles[handleID];
+                }
+            }
+            return wref;
+        }
+
+
 
 
         /// <summary>

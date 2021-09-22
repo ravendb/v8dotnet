@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "B/FlynMRKgdlpfvHl3Q/32QsN1NyacoK2BSQSuP4ZGnG/Ea2xeDDI6dtGhXpERSw2hhWfaZLSWhBHked4+WyYA==",
+  "success": true,
+  "projectFilePath": "/home/shlomo/work/projects/v8dotnet/Source/V8.NET-Proxy/project.json",
+  "expectedPackageFiles": [
+    "/root/.nuget/packages/gccbuildtargets/1.19.325.5/gccbuildtargets.1.19.325.5.nupkg.sha512"
+  ],
+  "logs": []
+}
