@@ -170,7 +170,7 @@ namespace V8.Net
             int i;
 
             for (i = 0; i < argCount; i++)
-                _args[i] = args[i]; // (since these will be disposed immediately after, the "first" flag is not required [this also prevents it from getting passed on])
+                _args[i] = new InternalHandle(args[i], true); // (since these will be disposed immediately after, the "first" flag is not required [this also prevents it from getting passed on])
 
             // (note: the underlying native handles for '_this' and any arguments will be disposed automatically upon return, unless the user calls 'KeepAlive()' on them)
 
@@ -183,6 +183,9 @@ namespace V8.Net
 
                 if (!result.IsEmpty) break;
             }
+
+            for (i = 0; i < argCount; i++)
+                _args[i].Dispose(); // (since these will be disposed immediately after, the "first" flag is not required [this also prevents it from getting passed on])
 
             var obj = result.Object;
 
