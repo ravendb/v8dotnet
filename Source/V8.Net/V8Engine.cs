@@ -689,22 +689,22 @@ namespace V8.Net
         /// <summary>
         /// Calls the native V8 proxy library to create the value instance for use within the V8 JavaScript environment.
         /// </summary>
-        public InternalHandle CreateValue(bool b) { return V8NetProxy.CreateBoolean(_NativeV8EngineProxy, b); }
+        public InternalHandle CreateValue(bool b) { return new InternalHandle(V8NetProxy.CreateBoolean(_NativeV8EngineProxy, b), true); }
 
         /// <summary>
         /// Calls the native V8 proxy library to create a 32-bit integer for use within the V8 JavaScript environment.
         /// </summary>
-        public InternalHandle CreateValue(Int32 num) { return V8NetProxy.CreateInteger(_NativeV8EngineProxy, num); }
+        public InternalHandle CreateValue(Int32 num) { return new InternalHandle(V8NetProxy.CreateInteger(_NativeV8EngineProxy, num), true); }
 
         /// <summary>
         /// Calls the native V8 proxy library to create a 64-bit number (double) for use within the V8 JavaScript environment.
         /// </summary>
-        public InternalHandle CreateValue(double num) { return V8NetProxy.CreateNumber(_NativeV8EngineProxy, num); }
+        public InternalHandle CreateValue(double num) { return new InternalHandle(V8NetProxy.CreateNumber(_NativeV8EngineProxy, num), true); }
 
         /// <summary>
         /// Calls the native V8 proxy library to create a string for use within the V8 JavaScript environment.
         /// </summary>
-        public InternalHandle CreateValue(string str) { return V8NetProxy.CreateString(_NativeV8EngineProxy, str); }
+        public InternalHandle CreateValue(string str) { return new InternalHandle(V8NetProxy.CreateString(_NativeV8EngineProxy, str), true); }
 
         /// <summary>
         /// Calls the native V8 proxy library to create an error string for use within the V8 JavaScript environment.
@@ -713,14 +713,14 @@ namespace V8.Net
         public InternalHandle CreateError(string message, JSValueType errorType)
         {
             if (errorType >= 0) throw new InvalidOperationException("Invalid error type.");
-            return V8NetProxy.CreateError(_NativeV8EngineProxy, message, errorType);
+            return new InternalHandle(V8NetProxy.CreateError(_NativeV8EngineProxy, message, errorType), true);
         }
 
         /// <summary>
         /// Calls the native V8 proxy library to create a date for use within the V8 JavaScript environment.
         /// </summary>
         /// <param name="ms">The number of milliseconds since epoch (Jan 1, 1970). This is the same value as 'SomeDate.getTime()' in JavaScript.</param>
-        public InternalHandle CreateValue(TimeSpan ms) { return V8NetProxy.CreateDate(_NativeV8EngineProxy, ms.TotalMilliseconds); }
+        public InternalHandle CreateValue(TimeSpan ms) { return new InternalHandle(V8NetProxy.CreateDate(_NativeV8EngineProxy, ms.TotalMilliseconds), true); }
 
         /// <summary>
         /// Calls the native V8 proxy library to create a date for use within the V8 JavaScript environment.
@@ -789,7 +789,7 @@ namespace V8.Net
             try
             {
                 // ... create a new native object and associated it with the new managed object ID ...
-                obj._Handle.Set(V8NetProxy.CreateObject(_NativeV8EngineProxy, obj.ID));
+                obj._Handle.Set(new InternalHandle(V8NetProxy.CreateObject(_NativeV8EngineProxy, obj.ID), true));
 
                 /* The V8 object will have an associated internal field set to the index of the created managed object above for quick lookup.  This index is used
                  * to locate the associated managed object when a call-back occurs. The lookup is a fast O(1) operation using the custom 'IndexedObjectList' manager.
@@ -825,7 +825,7 @@ namespace V8.Net
         {
             HandleProxy** nativeArrayMem = items.Length > 0 ? Utilities.MakeHandleProxyArray(items) : null;
 
-            InternalHandle handle = V8NetProxy.CreateArray(_NativeV8EngineProxy, nativeArrayMem, items.Length);
+            InternalHandle handle = new InternalHandle(V8NetProxy.CreateArray(_NativeV8EngineProxy, nativeArrayMem, items.Length), true);
 
             Utilities.FreeNativeMemory((IntPtr)nativeArrayMem);
 
@@ -877,7 +877,7 @@ namespace V8.Net
         public InternalHandle CreateValue(IEnumerable<string> items)
         {
             var _items = items?.ToArray(); // (the enumeration could be lengthy depending on the implementation, so iterate it only once and dump it to an array)
-            if (_items == null || _items.Length == 0) return V8NetProxy.CreateArray(_NativeV8EngineProxy, null, 0);
+            if (_items == null || _items.Length == 0) return new InternalHandle(V8NetProxy.CreateArray(_NativeV8EngineProxy, null, 0), true);
 
             int strBufSize = 0; // (size needed for the string chars portion of the memory block)
             int itemsCount = 0;
@@ -904,7 +904,7 @@ namespace V8.Net
                 strWritePtr += itemLength + 1;
             }
 
-            InternalHandle handle = V8NetProxy.CreateStringArray(_NativeV8EngineProxy, oneBigStringBlock, itemsCount);
+            InternalHandle handle = new InternalHandle(V8NetProxy.CreateStringArray(_NativeV8EngineProxy, oneBigStringBlock, itemsCount), true);
 
             Utilities.FreeNativeMemory((IntPtr)oneBigStringBlock);
 
@@ -916,7 +916,7 @@ namespace V8.Net
         /// <summary>
         /// Simply creates and returns a 'null' JavaScript value.
         /// </summary>
-        public InternalHandle CreateNullValue() { return V8NetProxy.CreateNullValue(_NativeV8EngineProxy); }
+        public InternalHandle CreateNullValue() { return new InternalHandle(V8NetProxy.CreateNullValue(_NativeV8EngineProxy), true); }
 
         // --------------------------------------------------------------------------------------------------------------------
 
@@ -935,53 +935,61 @@ namespace V8.Net
         /// <returns>A native value that best represents the given managed value.</returns>
         public InternalHandle CreateValue(object value, bool? recursive = null, ScriptMemberSecurity? memberSecurity = null)
         {
+            var jsRes = InternalHandle.Empty;
             if (value == null)
-                return CreateNullValue();
+                jsRes = CreateNullValue();
             else if (value is IHandleBased)
-                return ((IHandleBased)value).InternalHandle; // (already a V8.NET value!)
+                jsRes = ((IHandleBased)value).InternalHandle; // (already a V8.NET value!)
             else if (value is bool)
-                return CreateValue((bool)value);
+                jsRes = CreateValue((bool)value);
             else if (value is byte)
-                return CreateValue((Int32)(byte)value);
+                jsRes = CreateValue((Int32)(byte)value);
             else if (value is sbyte)
-                return CreateValue((Int32)(sbyte)value);
+                jsRes = CreateValue((Int32)(sbyte)value);
             else if (value is Int16)
-                return CreateValue((Int32)(Int16)value);
+                jsRes = CreateValue((Int32)(Int16)value);
             else if (value is UInt16)
-                return CreateValue((Int32)(UInt16)value);
+                jsRes = CreateValue((Int32)(UInt16)value);
             else if (value is Int32)
-                return CreateValue((Int32)value);
+                jsRes = CreateValue((Int32)value);
             else if (value is UInt32)
-                return CreateValue((double)(UInt32)value);
+                jsRes = CreateValue((double)(UInt32)value);
             else if (value is Int64)
-                return CreateValue((double)(Int64)value); // (warning: data loss may occur when converting 64int->64float)
+                jsRes = CreateValue((double)(Int64)value); // (warning: data loss may occur when converting 64int->64float)
             else if (value is UInt64)
-                return CreateValue((double)(UInt64)value); // (warning: data loss may occur when converting 64int->64float)
+                jsRes = CreateValue((double)(UInt64)value); // (warning: data loss may occur when converting 64int->64float)
             else if (value is Single)
-                return CreateValue((double)(Single)value);
+                jsRes = CreateValue((double)(Single)value);
             else if (value is float)
-                return CreateValue((double)(float)value);
+                jsRes = CreateValue((double)(float)value);
             else if (value is double)
-                return CreateValue((double)value);
+                jsRes = CreateValue((double)value);
             else if (value is string)
-                return CreateValue((string)value);
+                jsRes = CreateValue((string)value);
             else if (value is char)
-                return CreateValue(((char)value).ToString());
+                jsRes = CreateValue(((char)value).ToString());
             else if (value is StringBuilder)
-                return CreateValue(((StringBuilder)value).ToString());
+                jsRes = CreateValue(((StringBuilder)value).ToString());
             else if (value is DateTime)
-                return CreateValue((DateTime)value);
+                jsRes = CreateValue((DateTime)value);
             else if (value is TimeSpan)
-                return CreateValue((TimeSpan)value);
+                jsRes = CreateValue((TimeSpan)value);
             else if (value is Enum) // (enums are simply integer like values)
-                return CreateValue((int)value);
+                jsRes = CreateValue((int)value);
             else if (value is Array)
-                return CreateValue((IEnumerable)value);
+                jsRes = CreateValue((IEnumerable)value);
             else //??if (value.GetType().IsClass)
-                return CreateBinding(value, null, recursive, memberSecurity);
+                jsRes = CreateBinding(value, null, recursive, memberSecurity);
 
-            //??var type = value != null ? value.GetType().Name : "null";
-            //??throw new NotSupportedException("Cannot convert object of type '" + type + "' to a JavaScript value.");
+            if (jsRes.IsEmpty) {
+                throw new NotSupportedException($"Cannot convert object of type '{value.GetType().Name}' to a JavaScript value.");
+            }
+
+#if DEBUG
+            if (jsRes.RefCount != 1)
+                throw new InvalidOperationException($"Create value wrong ref count (not 1): {jsRes.RefCount}");
+#endif
+            return jsRes;
         }
 
         // --------------------------------------------------------------------------------------------------------------------
