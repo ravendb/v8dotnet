@@ -1719,6 +1719,9 @@ namespace V8.Net
             if (!IsObjectType)
                 throw new InvalidOperationException(_NOT_AN_OBJECT_ERRORMSG);
 
+            for (int i = 0; i < args.Length; i++)
+                args[i].KeepAlive();
+
             HandleProxy** nativeArrayMem = Utilities.MakeHandleProxyArray(args);
 
             HandleProxy* pResult = V8NetProxy.Call(this, functionName, _this, args.Length, nativeArrayMem);
