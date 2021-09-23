@@ -158,44 +158,53 @@ namespace V8.Net
         // TODO: This is shared in both templates - consider putting elsewhere.
         internal static HandleProxy* _CallBack(Int32 managedObjectID, bool isConstructCall, HandleProxy* _this, HandleProxy** args, Int32 argCount, params JSFunction[] functions)
         {
-            // ... get a handle to the native "this" object ...
-
-            InternalHandle hThis = _this;
-
-            V8Engine engine = hThis.Engine;
-
             // ... wrap the arguments ...
-
             InternalHandle[] _args = new InternalHandle[argCount];
             int i;
 
-            for (i = 0; i < argCount; i++)
-                _args[i] = new InternalHandle(args[i], true); // (since these will be disposed immediately after, the "first" flag is not required [this also prevents it from getting passed on])
+            for (i = 0; i < argCount; i++) {
+                HandleProxy* arg = args[i];
+
+#if DEBUG                
+                /*if (_this->ID == arg->ID)
+                    throw new InvalidOperationException($"_CallBack: argument {i} is set to 'this' global object: handleID={arg->ID}");
+                if (i > 0 && args[i-1]->ID == arg->ID)
+                    throw new InvalidOperationException($"_CallBack: argument {i} is set to the previous one: handleID={arg->ID}");
+                */
+#endif
+                _args[i] = new InternalHandle(arg, true); // (since these will be disposed immediately after, the "first" flag is not required [this also prevents it from getting passed on])
+            }
 
             // (note: the underlying native handles for '_this' and any arguments will be disposed automatically upon return, unless the user calls 'KeepAlive()' on them)
 
-            InternalHandle result = null;
+            var result = InternalHandle.Empty;
 
-            // ... call all function types (multiple custom derived function types are allowed, but only one of each type) ...
-            foreach (var callback in functions)
+            // ... get a handle to the native "this" object ...
+            using (InternalHandle hThis = _this)
             {
-                result = callback(engine, isConstructCall, hThis, _args);
+                V8Engine engine = hThis.Engine;
 
-                if (!result.IsEmpty) break;
+                // ... call all function types (multiple custom derived function types are allowed, but only one of each type) ...
+                foreach (var callback in functions)
+                {
+                    result = callback(engine, isConstructCall, hThis, _args);
+
+                    if (!result.IsEmpty) break;
+                }
+
+                for (i = 0; i < argCount; i++)
+                    _args[i].Dispose(); // (since these will be disposed immediately after, the "first" flag is not required [this also prevents it from getting passed on])
+
+                var obj = result.Object;
+
+                // ... make sure the user is not returning a 'V8ManagedObject' instance associated with the new object (the property interceptors will never work) ...
+
+                if (isConstructCall && obj != null && obj is V8ManagedObject && obj.InternalHandle == hThis)
+                    throw new InvalidOperationException("You've attempted to return the type '" + obj.GetType().Name
+                        + "' which is of type V8ManagedObject in a construction call (using 'new' in JavaScript) to wrap the new native object given to the constructor.  The native V8 engine"
+                        + " only supports interceptor hooks for objects generated from ObjectTemplate instances.  You will need to first derive/implement from V8NativeObject/IV8NativeObject"
+                        + " for your custom object(s), or rewrite your object to use V8NativeObject directly instead and use the 'SetAccessor()' handle method.");
             }
-
-            for (i = 0; i < argCount; i++)
-                _args[i].Dispose(); // (since these will be disposed immediately after, the "first" flag is not required [this also prevents it from getting passed on])
-
-            var obj = result.Object;
-
-            // ... make sure the user is not returning a 'V8ManagedObject' instance associated with the new object (the property interceptors will never work) ...
-
-            if (isConstructCall && obj != null && obj is V8ManagedObject && obj.InternalHandle == hThis)
-                throw new InvalidOperationException("You've attempted to return the type '" + obj.GetType().Name
-                    + "' which is of type V8ManagedObject in a construction call (using 'new' in JavaScript) to wrap the new native object given to the constructor.  The native V8 engine"
-                    + " only supports interceptor hooks for objects generated from ObjectTemplate instances.  You will need to first derive/implement from V8NativeObject/IV8NativeObject"
-                    + " for your custom object(s), or rewrite your object to use V8NativeObject directly instead and use the 'SetAccessor()' handle method.");
 
             using (result.KeepAlive())
                 return result;
