@@ -121,11 +121,10 @@ namespace V8.Net
     public unsafe class RootableReference : WeakReferenceStub
     {
         /// <summary> Allows overriding the weak reference by rooting the target object to this entry. </summary>
-        public InternalHandle RootedHandle;
+        public InternalHandle RootedHandle = InternalHandle.Empty;
 
         public RootableReference(IV8NativeObject target, bool trackResurrection = true) : base(target, trackResurrection)
         {
-            RootedHandle = InternalHandle.Empty;
         }
 
         ~RootableReference()

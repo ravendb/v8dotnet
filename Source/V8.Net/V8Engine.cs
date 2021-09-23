@@ -257,7 +257,7 @@ namespace V8.Net
                 if (autoCreateGlobalContext)
                 {
                     _NativeContext = V8NetProxy.CreateContext(_NativeV8EngineProxy, _GlobalObjectTemplateProxy._NativeObjectTemplateProxy);
-                    _GlobalObject = V8NetProxy.SetContext(_NativeV8EngineProxy, _NativeContext); // (returns the global object handle)
+                    _GlobalObject = new InternalHandle(V8NetProxy.SetContext(_NativeV8EngineProxy, _NativeContext), true); // (returns the global object handle)
                 }
             }
 
@@ -301,7 +301,7 @@ namespace V8.Net
                 RootableReference rref;
                 V8NativeObject obj;
 
-                for (var i = 0; i < _Objects.Count; i++)
+                for (var i = 0; i < _Objects.Count; i++) {
                     if ((rref = _Objects[i]) != null && (obj = (V8NativeObject)rref.Target) != null)
                     {
                         obj.OnDispose();
@@ -310,6 +310,9 @@ namespace V8.Net
                         obj._Handle = InternalHandle.Empty;
                         GC.SuppressFinalize(obj);
                     }
+                }
+
+                _GlobalObject.Dispose();
 
                 // ... destroy the native engine ...
                 // TODO: Consider caching the engine instead and reuse with a new context.

@@ -62,6 +62,7 @@ namespace V8.Net
         /// </summary>
         ~Handle()
         {
+            _Handle.Dec();
             _Handle.ForceDispose(true, false);
             //?this.Finalizing();
         }
@@ -223,6 +224,18 @@ namespace V8.Net
             }
         }
 
+        public Int32 EngineID {
+            get {
+                return _HandleProxy != null ? _HandleProxy->EngineID : -1;
+            }
+        }
+
+        public string Summary {
+            get {
+                return $"engineID={EngineID}, handleID={HandleID}, objectID={ObjectID}, refCount={RefCount}, isRooted={IsRooted}, type={ValueType}";
+            }
+        }
+
 
         /// <summary>
         /// The managed object represented by this handle, if any, or null otherwise.
@@ -376,12 +389,13 @@ namespace V8.Net
         /// <summary>
         /// Wraps a given native handle proxy to provide methods to operate on it.
         /// </summary>
-        internal InternalHandle(HandleProxy* hp, bool keepTrackAndAlive = false)
+        internal InternalHandle(HandleProxy* hp, bool keepTrack = true)
         {
+            keepTrack = hp != null;
             _HandleProxy = null;
             _Object = null;
             _Set(hp);
-            if (keepTrackAndAlive) {
+            if (keepTrack) {
                 GetTrackableHandle();
                 CountedRef.Inc();
             }
@@ -390,16 +404,17 @@ namespace V8.Net
         /// <summary>
         /// Sets this instance to the same specified handle value.
         /// </summary>
-        public InternalHandle(ref InternalHandle h, bool keepTrackAndAlive = false)
+        public InternalHandle(ref InternalHandle h, bool keepTrack = true)
         {
+            keepTrack = true;
             _HandleProxy = null;
             _Object = null;
 
-            if (keepTrackAndAlive) {
+            if (keepTrack) {
                 h.KeepTrack();
             }
             _Set(h);
-            if (keepTrackAndAlive) {
+            if (keepTrack) {
                 CountedRef.Inc();
                 /*if (h._Object == null) {
                     h._Object = _Object;
@@ -751,7 +766,7 @@ namespace V8.Net
 
         public static implicit operator InternalHandle(HandleProxy* handleProxy)
         {
-            return handleProxy != null ? new InternalHandle(handleProxy) : InternalHandle.Empty;
+            return handleProxy != null ? new InternalHandle(handleProxy, true) : InternalHandle.Empty;
         }
 
         // --------------------------------------------------------------------------------------------------------------------
