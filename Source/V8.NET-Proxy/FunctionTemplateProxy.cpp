@@ -72,10 +72,11 @@ void FunctionTemplateProxy::InvocationCallbackProxy(const FunctionCallbackInfo<V
 		auto argLength = args.Length();
 		auto _args = argLength > 0 ? new HandleProxy*[argLength] : nullptr;
 
-		for (auto i = 0; i < argLength; i++)
-			_args[i] = engine->GetHandleProxy(args[i]);
-
 		auto _this = engine->GetHandleProxy(args.This()); // (was args.Holder())
+
+		for (auto i = 0; i < argLength; i++) {
+			_args[i] = engine->GetHandleProxy(args[i]);
+		}
 
 		engine->_InCallbackScope++;
 		HandleProxy* result = nullptr;
