@@ -275,7 +275,15 @@ void V8EngineProxy::QueueHandleDisposal(HandleProxy *handleProxy)
 	{
 		handleProxy->_Disposed |= 16;
 		lock_guard<std::mutex> handleSection(_DisposingHandleMutex); // NO V8 HANDLE ACCESS HERE BECAUSE OF THE MANAGED GC
-		_HandlesPendingDisposal.push_back(handleProxy);
+		bool isAlreadyIn = false;
+		for(auto h : _HandlesPendingDisposal) {
+			if (h->_ID == handleProxy->_ID) {
+				isAlreadyIn = true;
+				break;
+			}
+		}
+		if (!isAlreadyIn)
+			_HandlesPendingDisposal.push_back(handleProxy);
 	}
 }
 
