@@ -164,14 +164,6 @@ namespace V8.Net
 
             for (i = 0; i < argCount; i++) {
                 HandleProxy* arg = args[i];
-
-#if DEBUG                
-                /*if (_this->ID == arg->ID)
-                    throw new InvalidOperationException($"_CallBack: argument {i} is set to 'this' global object: handleID={arg->ID}");
-                if (i > 0 && args[i-1]->ID == arg->ID)
-                    throw new InvalidOperationException($"_CallBack: argument {i} is set to the previous one: handleID={arg->ID}");
-                */
-#endif
                 _args[i] = new InternalHandle(arg, true); // (since these will be disposed immediately after, the "first" flag is not required [this also prevents it from getting passed on])
             }
 
