@@ -116,7 +116,7 @@ namespace V8.Net
         /// <summary>
         /// The handle has lost all managed side references and was marked weak on the native side.
         /// </summary>
-        public bool IsCLRDisposed => (Disposed & 2) > 0 || (Disposed & 4) > 0 || ManagedReference < 2;
+        public bool IsCLRDisposed => (Disposed & 2) > 0 || (Disposed & 4) > 0 || ManagedReference < 2 || IsDisposing;
 
         ///// <summary>
         ///// The handle is going through the disposal process. 

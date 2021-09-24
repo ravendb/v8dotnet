@@ -656,16 +656,16 @@ namespace V8.Net
                 
                 Engine?.Reset(handleID);
 
-                _HandleProxy->ManagedReference = 1; // (can now dispose, so downgrade this just in case)
-                // DO NOT clear '_HandleProxy->_ObjectID' as the engine needs it to clear references on it's end, if an object existed)
-                _HandleProxy->Disposed |= 2; // (flag that the managed side is done with it)
-                V8NetProxy.DisposeHandleProxy(_HandleProxy); // (note: this will not work unless '__HandleProxy->Disposed' is 1, which starts the disposal process)
+                if (!_HandleProxy->IsCLRDisposed) {
+                    _HandleProxy->ManagedReference = 1; // (can now dispose, so downgrade this just in case)
+                    // DO NOT clear '_HandleProxy->_ObjectID' as the engine needs it to clear references on it's end, if an object existed)
+                    _HandleProxy->Disposed |= 2; // (flag that the managed side is done with it)
+                    V8NetProxy.DisposeHandleProxy(_HandleProxy); // (note: this will not work unless '__HandleProxy->Disposed' is 1, which starts the disposal process)
+                    GC.RemoveMemoryPressure((Marshal.SizeOf(typeof(HandleProxy))));
+                }
 
                 ObjectID = -1; // (resets the object ID on the native side [though this happens anyhow once cached], which also causes the reference to clear)
                 _CurrentObjectID = -1;
-
-                GC.RemoveMemoryPressure((Marshal.SizeOf(typeof(HandleProxy))));
-
                 _HandleProxy = null;
             }
             _Object = null;
