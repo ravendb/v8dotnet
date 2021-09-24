@@ -978,21 +978,24 @@ namespace V8.Net
 
             return (HandleProxy* __this, string propertyName, HandleProxy* __value) =>
             {
-                InternalHandle _this = __this, value = __value;
-                if (memberDetails.MemberSecurity < 0) return Engine.CreateError("Access denied.", JSValueType.ExecutionError);
-                if (!memberDetails.HasSecurityFlags(ScriptMemberSecurity.ReadOnly))
+                InternalHandle value = __value;
+                using (InternalHandle _this = __this)
                 {
-                    if (_this.IsBinder)
+                    if (memberDetails.MemberSecurity < 0) return Engine.CreateError("Access denied.", JSValueType.ExecutionError);
+                    if (!memberDetails.HasSecurityFlags(ScriptMemberSecurity.ReadOnly))
                     {
-                        object _value = new ArgInfo(Engine, value, null, fieldInfo.FieldType).ValueOrDefault;
+                        if (_this.IsBinder)
+                        {
+                            object _value = new ArgInfo(Engine, value, null, fieldInfo.FieldType).ValueOrDefault;
 
-                        if (isInternalHandleTypeExpected && _value is InternalHandle)
-                            _value = ((IHandle)fieldInfo.GetValue(_this.BoundObject)).Set((InternalHandle)_value); // (the current handle *value* must be set properly so it can be disposed before setting if need be)
+                            if (isInternalHandleTypeExpected && _value is InternalHandle)
+                                _value = ((IHandle)fieldInfo.GetValue(_this.BoundObject)).Set((InternalHandle)_value); // (the current handle *value* must be set properly so it can be disposed before setting if need be)
 
-                        fieldInfo.SetValue(_this.BoundObject, _value);
+                            fieldInfo.SetValue(_this.BoundObject, _value);
+                        }
+                        else
+                            return Engine.CreateError(string.Format(TYPE_BINDER_MISSING_MSG, "property", propertyName, fieldInfo.Name), JSValueType.ExecutionError);
                     }
-                    else
-                        return Engine.CreateError(string.Format(TYPE_BINDER_MISSING_MSG, "property", propertyName, fieldInfo.Name), JSValueType.ExecutionError);
                 }
                 return value;
             };
@@ -1005,27 +1008,31 @@ namespace V8.Net
             if (isSystemType)
                 return (HandleProxy* __this, string propertyName) =>
                 {
-                    InternalHandle _this = __this;
-                    if (memberDetails.MemberSecurity < 0) return Engine.CreateError("Access denied.", JSValueType.ExecutionError);
-                    // (note: it's an error to read some properties in special cases on certain system type instances (such as 'Type.GenericParameterPosition'), so just ignore and return the message on system instances)
-                    try
+                    using (InternalHandle _this = __this)
                     {
+                        if (memberDetails.MemberSecurity < 0) return Engine.CreateError("Access denied.", JSValueType.ExecutionError);
+                        // (note: it's an error to read some properties in special cases on certain system type instances (such as 'Type.GenericParameterPosition'), so just ignore and return the message on system instances)
+                        try
+                        {
+                            if (_this.IsBinder)
+                                return Engine.CreateValue((T)fieldInfo.GetValue(_this.BoundObject));
+                            else
+                                return Engine.CreateError(string.Format(TYPE_BINDER_MISSING_MSG, "property", propertyName, fieldInfo.Name), JSValueType.ExecutionError);
+                        }
+                        catch (Exception ex) { return Engine.CreateValue(Exceptions.GetFullErrorMessage(ex)); }
+                    }
+                };
+            else
+                return (HandleProxy* __this, string propertyName) =>
+                {
+                    using (InternalHandle _this = __this)
+                    {
+                        if (memberDetails.MemberSecurity < 0) return InternalHandle.Empty;
                         if (_this.IsBinder)
                             return Engine.CreateValue((T)fieldInfo.GetValue(_this.BoundObject));
                         else
                             return Engine.CreateError(string.Format(TYPE_BINDER_MISSING_MSG, "property", propertyName, fieldInfo.Name), JSValueType.ExecutionError);
                     }
-                    catch (Exception ex) { return Engine.CreateValue(Exceptions.GetFullErrorMessage(ex)); }
-                };
-            else
-                return (HandleProxy* __this, string propertyName) =>
-                {
-                    InternalHandle _this = __this;
-                    if (memberDetails.MemberSecurity < 0) return InternalHandle.Empty;
-                    if (_this.IsBinder)
-                        return Engine.CreateValue((T)fieldInfo.GetValue(_this.BoundObject));
-                    else
-                        return Engine.CreateError(string.Format(TYPE_BINDER_MISSING_MSG, "property", propertyName, fieldInfo.Name), JSValueType.ExecutionError);
                 };
         }
 
@@ -1045,27 +1052,31 @@ namespace V8.Net
             else if (isSystemType)
                 return (HandleProxy* __this, string propertyName) =>
                 {
-                    InternalHandle _this = __this;
-                    if (memberDetails.MemberSecurity < 0) return Engine.CreateError("Access denied.", JSValueType.ExecutionError);
-                    // (note: it's an error to read some properties in special cases on certain system type instances (such as 'Type.GenericParameterPosition'), so just ignore and return the message on system instances)
-                    try
+                    using (InternalHandle _this = __this)
                     {
+                        if (memberDetails.MemberSecurity < 0) return Engine.CreateError("Access denied.", JSValueType.ExecutionError);
+                        // (note: it's an error to read some properties in special cases on certain system type instances (such as 'Type.GenericParameterPosition'), so just ignore and return the message on system instances)
+                        try
+                        {
+                            if (_this.IsBinder)
+                                return Engine.CreateValue(fieldInfo.GetValue(_this.BoundObject), _Recursive);
+                            else
+                                return Engine.CreateError(string.Format(TYPE_BINDER_MISSING_MSG, "property", propertyName, fieldInfo.Name), JSValueType.ExecutionError);
+                        }
+                        catch (Exception ex) { return Engine.CreateValue(Exceptions.GetFullErrorMessage(ex)); }
+                    }
+                };
+            else
+                return (HandleProxy* __this, string propertyName) =>
+                {
+                    using (InternalHandle _this = __this)
+                    {
+                        if (memberDetails.MemberSecurity < 0) return Engine.CreateError("Access denied.", JSValueType.ExecutionError);
                         if (_this.IsBinder)
                             return Engine.CreateValue(fieldInfo.GetValue(_this.BoundObject), _Recursive);
                         else
                             return Engine.CreateError(string.Format(TYPE_BINDER_MISSING_MSG, "property", propertyName, fieldInfo.Name), JSValueType.ExecutionError);
                     }
-                    catch (Exception ex) { return Engine.CreateValue(Exceptions.GetFullErrorMessage(ex)); }
-                };
-            else
-                return (HandleProxy* __this, string propertyName) =>
-                {
-                    InternalHandle _this = __this;
-                    if (memberDetails.MemberSecurity < 0) return Engine.CreateError("Access denied.", JSValueType.ExecutionError);
-                    if (_this.IsBinder)
-                        return Engine.CreateValue(fieldInfo.GetValue(_this.BoundObject), _Recursive);
-                    else
-                        return Engine.CreateError(string.Format(TYPE_BINDER_MISSING_MSG, "property", propertyName, fieldInfo.Name), JSValueType.ExecutionError);
                 };
         }
 
@@ -1159,21 +1170,23 @@ namespace V8.Net
 
             return (HandleProxy* __this, string propertyName, HandleProxy* value) =>
             {
-                InternalHandle _this = __this;
-                if (memberDetails.MemberSecurity < 0) return Engine.CreateError("Access denied.", JSValueType.ExecutionError);
-                if (canWrite && !memberDetails.HasSecurityFlags(ScriptMemberSecurity.ReadOnly))
+                using (InternalHandle _this = __this)
                 {
-                    if (_this.IsBinder)
+                    if (memberDetails.MemberSecurity < 0) return Engine.CreateError("Access denied.", JSValueType.ExecutionError);
+                    if (canWrite && !memberDetails.HasSecurityFlags(ScriptMemberSecurity.ReadOnly))
                     {
-                        object _value = new ArgInfo(Engine, value, null, propertyInfo.PropertyType).ValueOrDefault;
+                        if (_this.IsBinder)
+                        {
+                            object _value = new ArgInfo(Engine, value, null, propertyInfo.PropertyType).ValueOrDefault;
 
-                        if (isInternalHandleTypeExpected && canRead && _value is InternalHandle)
-                            _value = ((IHandle)propertyInfo.GetValue(_this.BoundObject, null)).Set((InternalHandle)_value); // (the current handle *value* must be set properly so it can be disposed before setting if need be)
+                            if (isInternalHandleTypeExpected && canRead && _value is InternalHandle)
+                                _value = ((IHandle)propertyInfo.GetValue(_this.BoundObject, null)).Set((InternalHandle)_value); // (the current handle *value* must be set properly so it can be disposed before setting if need be)
 
-                        propertyInfo.SetValue(_this.BoundObject, _value, null);
+                            propertyInfo.SetValue(_this.BoundObject, _value, null);
+                        }
+                        else
+                            return Engine.CreateError(string.Format(TYPE_BINDER_MISSING_MSG, "property", propertyName, propertyInfo.Name), JSValueType.ExecutionError);
                     }
-                    else
-                        return Engine.CreateError(string.Format(TYPE_BINDER_MISSING_MSG, "property", propertyName, propertyInfo.Name), JSValueType.ExecutionError);
                 }
                 return value;
             };
@@ -1187,33 +1200,37 @@ namespace V8.Net
             if (isSystemType)
                 return (HandleProxy* __this, string propertyName) =>
                 {
-                    InternalHandle _this = __this;
-                    if (memberDetails.MemberSecurity < 0) return Engine.CreateError("Access denied.", JSValueType.ExecutionError);
-                    if (propertyInfo.CanRead)
+                    using (InternalHandle _this = __this)
                     {
-                        // (note: it's an error to read some properties in special cases on certain system type instances (such as 'Type.GenericParameterPosition'), so just ignore and return the message on system instances)
-                        try
+                        if (memberDetails.MemberSecurity < 0) return Engine.CreateError("Access denied.", JSValueType.ExecutionError);
+                        if (propertyInfo.CanRead)
                         {
-                            if (_this.IsBinder)
-                                return Engine.CreateValue((T)propertyInfo.GetValue(_this.BoundObject, null));
-                            else
-                                return Engine.CreateError(string.Format(TYPE_BINDER_MISSING_MSG, "property", propertyName, propertyInfo.Name), JSValueType.ExecutionError);
+                            // (note: it's an error to read some properties in special cases on certain system type instances (such as 'Type.GenericParameterPosition'), so just ignore and return the message on system instances)
+                            try
+                            {
+                                if (_this.IsBinder)
+                                    return Engine.CreateValue((T)propertyInfo.GetValue(_this.BoundObject, null));
+                                else
+                                    return Engine.CreateError(string.Format(TYPE_BINDER_MISSING_MSG, "property", propertyName, propertyInfo.Name), JSValueType.ExecutionError);
+                            }
+                            catch (Exception ex) { return Engine.CreateValue(Exceptions.GetFullErrorMessage(ex)); }
                         }
-                        catch (Exception ex) { return Engine.CreateValue(Exceptions.GetFullErrorMessage(ex)); }
                     }
                     return InternalHandle.Empty;
                 };
             else
                 return (HandleProxy* __this, string propertyName) =>
                 {
-                    InternalHandle _this = __this;
-                    if (memberDetails.MemberSecurity < 0) return Engine.CreateError("Access denied.", JSValueType.ExecutionError);
-                    if (propertyInfo.CanRead)
+                    using (InternalHandle _this = __this)
                     {
-                        if (_this.IsBinder)
-                            return Engine.CreateValue((T)propertyInfo.GetValue(_this.BoundObject, null));
-                        else
-                            return Engine.CreateError(string.Format(TYPE_BINDER_MISSING_MSG, "property", propertyName, propertyInfo.Name), JSValueType.ExecutionError);
+                        if (memberDetails.MemberSecurity < 0) return Engine.CreateError("Access denied.", JSValueType.ExecutionError);
+                        if (propertyInfo.CanRead)
+                        {
+                            if (_this.IsBinder)
+                                return Engine.CreateValue((T)propertyInfo.GetValue(_this.BoundObject, null));
+                            else
+                                return Engine.CreateError(string.Format(TYPE_BINDER_MISSING_MSG, "property", propertyName, propertyInfo.Name), JSValueType.ExecutionError);
+                        }
                     }
                     return InternalHandle.Empty;
                 };
@@ -1236,31 +1253,35 @@ namespace V8.Net
             else if (isSystemType)
                 return (HandleProxy* __this, string propertyName) =>
                 {
-                    InternalHandle _this = __this;
-                    if (propertyInfo.CanRead)
+                    using (InternalHandle _this = __this)
                     {
-                        // (note: it's an error to read some properties in special cases on certain system type instances (such as 'Type.GenericParameterPosition'), so just ignore and return the message on system instances)
-                        try
+                        if (propertyInfo.CanRead)
                         {
-                            if (_this.IsBinder)
-                                return Engine.CreateValue(propertyInfo.GetValue(_this.BoundObject, null), _Recursive);
-                            else
-                                return Engine.CreateError(string.Format(TYPE_BINDER_MISSING_MSG, "property", propertyName, propertyInfo.Name), JSValueType.ExecutionError);
+                            // (note: it's an error to read some properties in special cases on certain system type instances (such as 'Type.GenericParameterPosition'), so just ignore and return the message on system instances)
+                            try
+                            {
+                                if (_this.IsBinder)
+                                    return Engine.CreateValue(propertyInfo.GetValue(_this.BoundObject, null), _Recursive);
+                                else
+                                    return Engine.CreateError(string.Format(TYPE_BINDER_MISSING_MSG, "property", propertyName, propertyInfo.Name), JSValueType.ExecutionError);
+                            }
+                            catch (Exception ex) { return Engine.CreateValue(Exceptions.GetFullErrorMessage(ex)); }
                         }
-                        catch (Exception ex) { return Engine.CreateValue(Exceptions.GetFullErrorMessage(ex)); }
                     }
                     return InternalHandle.Empty;
                 };
             else
                 return (HandleProxy* __this, string propertyName) =>
                 {
-                    InternalHandle _this = __this;
-                    if (propertyInfo.CanRead)
+                    using (InternalHandle _this = __this)
                     {
-                        if (_this.IsBinder)
-                            return Engine.CreateValue(propertyInfo.GetValue(_this.BoundObject, null), _Recursive);
-                        else
-                            return Engine.CreateError(string.Format(TYPE_BINDER_MISSING_MSG, "property", propertyName, propertyInfo.Name), JSValueType.ExecutionError);
+                        if (propertyInfo.CanRead)
+                        {
+                            if (_this.IsBinder)
+                                return Engine.CreateValue(propertyInfo.GetValue(_this.BoundObject, null), _Recursive);
+                            else
+                                return Engine.CreateError(string.Format(TYPE_BINDER_MISSING_MSG, "property", propertyName, propertyInfo.Name), JSValueType.ExecutionError);
+                        }
                     }
                     return InternalHandle.Empty;
                 };

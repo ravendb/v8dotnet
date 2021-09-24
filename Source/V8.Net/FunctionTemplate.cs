@@ -239,11 +239,10 @@ namespace V8.Net
             // ... get the v8 "Function" object ...
 
             InternalHandle hNativeFunc = V8NetProxy.GetFunction(_NativeFunctionTemplateProxy);
-
             // ... create a managed wrapper for the V8 "Function" object (note: functions inherit the native V8 "Object" type) ...
 
             func = _Engine._GetObject<T>(this, hNativeFunc, true, false); // (note: this will "connect" the native object [hNativeFunc] to a new managed V8Function wrapper, and set the prototype!)
-
+            
             if (callback != null)
                 func.Callback = callback;
 

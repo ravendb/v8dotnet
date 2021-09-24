@@ -414,7 +414,7 @@ namespace V8.Net
         ///     since no tracking is required.
         /// </param>
         /// <returns> An InternalHandle. </returns>
-        public InternalHandle Execute(string script, string sourceName = "V8.NET", bool throwExceptionOnError = false, int timeout = 0, bool trackReturn = true)
+        public InternalHandle Execute(string script, string sourceName = "V8.NET", bool throwExceptionOnError = false, int timeout = 0)
         {
             Timer timer = null;
 
@@ -430,7 +430,7 @@ namespace V8.Net
             if (throwExceptionOnError)
                 result.ThrowOnError();
 
-            return trackReturn ? result.KeepTrack() : result;
+            return result;
         }
 
         /// <summary> Executes JavaScript on the V8 engine and returns the result. </summary>
@@ -462,7 +462,7 @@ namespace V8.Net
             if (throwExceptionOnError)
                 result.ThrowOnError();
 
-            return result.KeepTrack();
+            return result;
         }
 
         /// <summary>
@@ -485,7 +485,7 @@ namespace V8.Net
         {
             InternalHandle result = Execute(script, sourceName, throwExceptionOnError, timeout);
             Console.WriteLine(result.AsString);
-            return result.KeepTrack();
+            return result;
         }
 
         /// <summary>
@@ -510,7 +510,7 @@ namespace V8.Net
             Console.WriteLine(script);
             InternalHandle result = Execute(script, sourceName, throwExceptionOnError, timeout);
             Console.WriteLine(result.AsString);
-            return result.KeepTrack();
+            return result;
         }
 
         /// <summary>
@@ -533,7 +533,7 @@ namespace V8.Net
             if (throwExceptionOnError)
                 result.ThrowOnError();
 
-            return result; //.KeepTrack();
+            return result;
         }
 
         /// <summary>
@@ -828,11 +828,11 @@ namespace V8.Net
         {
             HandleProxy** nativeArrayMem = items.Length > 0 ? Utilities.MakeHandleProxyArray(items) : null;
 
-            InternalHandle handle = new InternalHandle(V8NetProxy.CreateArray(_NativeV8EngineProxy, nativeArrayMem, items.Length), true);
+            InternalHandle result = new InternalHandle(V8NetProxy.CreateArray(_NativeV8EngineProxy, nativeArrayMem, items.Length), true);
 
             Utilities.FreeNativeMemory((IntPtr)nativeArrayMem);
 
-            return handle;
+            return result;
         }
 
         /// <summary>
