@@ -135,6 +135,13 @@ namespace V8.Net
         /// </summary>
         public bool IsDisposed => (Disposed & 1) > 0;
 
+        public string Summary {
+            get {
+                return $"engineID={EngineID}, handleID={ID}, objectID={_ObjectID}, type={_Type}, clrTypeID={_CLRTypeID}, disposed={Disposed}, managedReference={ManagedReference}";
+            }
+        }
+
+
         // --------------------------------------------------------------------------------------------------------------------
 
         public object Value
