@@ -996,6 +996,119 @@ namespace V8.Net
         }
 
         // --------------------------------------------------------------------------------------------------------------------
+
+        public class MemorySnapshot {
+            public List<Int32> ExistingHandleIDs;
+            public List<Int32> ExistingObjectIDs;
+
+            public MemorySnapshot()
+            {
+                Reset();
+            }
+
+            public void Reset()
+            {
+                if (ExistingHandleIDs == null)
+                    ExistingHandleIDs = new List<Int32>();
+                else
+                    ExistingHandleIDs.Clear();
+
+                if (ExistingObjectIDs == null)
+                    ExistingObjectIDs = new List<Int32>();
+                else
+                    ExistingObjectIDs.Clear();
+            }
+        }
+
+
+        public Dictionary<string, MemorySnapshot> MemorySnapshots;
+
+        public void MakeSnapshot(string name)
+        {
+            if (MemorySnapshots == null)
+                MemorySnapshots = new Dictionary<string, MemorySnapshot>();
+
+            MemorySnapshot snapshot = null;
+            if (MemorySnapshots?.TryGetValue(name, out snapshot) == true &&
+                snapshot != null)
+            {
+                snapshot.Reset();
+            }
+            else {
+                snapshot = new MemorySnapshot();
+                MemorySnapshots[name] = snapshot;
+            }
+
+            for (var i = 0; i < _HandleProxies.Length; i++)
+            {
+                var hProxy = _HandleProxies[i];
+                if (hProxy != null && !hProxy->IsDisposed)
+                {
+                    snapshot.ExistingHandleIDs.Add(i);
+                }
+            }
+
+            for (var i = 0; i < _Objects.Count; i++)
+            {
+                var rootableRef = _Objects[i]; 
+                if (rootableRef != null) {
+                    snapshot.ExistingObjectIDs.Add(i);
+                }
+            }
+
+
+        }
+
+        public void CheckForMemoryLeaks(string name)
+        {
+            if (MemorySnapshots == null)
+                MemorySnapshots = new Dictionary<string, MemorySnapshot>();
+                
+            MemorySnapshot snapshot = null;
+            if (!(MemorySnapshots?.TryGetValue(name, out snapshot) == true &&
+                snapshot != null))
+            {
+                throw new InvalidOperationException($"CheckForMemoryLeaks: No snapshot named {name} exists");
+            }
+
+            string leakagesDescHandles = "";
+            string leakagesDescObjects = "";
+            for (var i = 0; i < _HandleProxies.Length; i++)
+            {
+                var hProxy = _HandleProxies[i];
+                if (hProxy != null && !hProxy->IsDisposed && !snapshot.ExistingHandleIDs.Contains(i))
+                {
+                    var h = new InternalHandle(hProxy, false);
+                    leakagesDescHandles += h.Summary + "\n";
+                }
+            }
+
+            for (var i = 0; i < _Objects.Count; i++)
+            {
+                var rootableRef = _Objects[i]; 
+                if (rootableRef != null && !snapshot.ExistingObjectIDs.Contains(i)) {
+                    if (!rootableRef.RootedHandle.IsEmpty) { 
+                        InternalHandle h = rootableRef.RootedHandle;
+                        leakagesDescObjects += h.Summary + "\n";
+                    }
+                    else {
+                        leakagesDescObjects += $"objectID={i}\n";
+                    }
+                }
+            }
+
+            string leakagesDesc = "";
+            if (leakagesDescHandles != "") {
+                leakagesDesc = "Leaked internal handles:\n" + leakagesDescHandles;
+            }
+            if (leakagesDescObjects != "") {
+                leakagesDesc = "Leaked managed objects:\n" + leakagesDescObjects;
+            }
+
+            if (leakagesDesc != "") {
+                throw new InvalidOperationException($"Memory snapshot {name}: " + leakagesDesc);
+            }
+        }
     }
 
     // ========================================================================================================================
