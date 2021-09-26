@@ -232,7 +232,7 @@ namespace V8.Net
 
         public string Summary {
             get {
-                return $"engineID={EngineID}, handleID={HandleID}, objectID={ObjectID}, refCount={RefCount}, isRooted={IsRooted}, type={ValueType}";
+                return _HandleProxy != null ? _HandleProxy->Summary + $", refCount={RefCount}, isRooted={IsRooted}" : null;
             }
         }
 
@@ -391,7 +391,8 @@ namespace V8.Net
         /// </summary>
         internal InternalHandle(HandleProxy* hp, bool keepTrack = true)
         {
-            keepTrack = hp != null;
+            if (hp == null)
+                keepTrack = false;
             _HandleProxy = null;
             _Object = null;
             _Set(hp);
