@@ -1000,6 +1000,7 @@ namespace V8.Net
         public class MemorySnapshot {
             public List<Int32> ExistingHandleIDs;
             public List<Int32> ExistingObjectIDs;
+            public List<InternalHandle> ExistingObjectHandles;
 
             public MemorySnapshot()
             {
@@ -1017,6 +1018,11 @@ namespace V8.Net
                     ExistingObjectIDs = new List<Int32>();
                 else
                     ExistingObjectIDs.Clear();
+
+                if (ExistingObjectHandles == null)
+                    ExistingObjectHandles = new List<InternalHandle>();
+                else
+                    ExistingObjectHandles.Clear();
             }
         }
 
@@ -1052,7 +1058,15 @@ namespace V8.Net
             {
                 var rootableRef = _Objects[i]; 
                 if (rootableRef != null) {
-                    snapshot.ExistingObjectIDs.Add(i);
+                    InternalHandle h = ((V8NativeObject)rootableRef.Target)?._ ?? InternalHandle.Empty;
+                    if (h.IsEmpty && !rootableRef.RootedHandle.IsEmpty) { 
+                        h = rootableRef.RootedHandle;
+                    }
+
+                    if (!h.IsEmpty) {
+                        snapshot.ExistingObjectIDs.Add(i);
+                        snapshot.ExistingObjectHandles.Add(h);
+                    }
                 }
             }
 
@@ -1073,26 +1087,53 @@ namespace V8.Net
 
             string leakagesDescHandles = "";
             string leakagesDescObjects = "";
-            for (var i = 0; i < _HandleProxies.Length; i++)
+            using (var jsStringify = this.Execute("JSON.stringify", "JSON.stringify", true, 0))
             {
-                var hProxy = _HandleProxies[i];
-                if (hProxy != null && !hProxy->IsDisposed && !snapshot.ExistingHandleIDs.Contains(i))
-                {
-                    var h = new InternalHandle(hProxy, false);
-                    leakagesDescHandles += h.Summary + "\n";
-                }
-            }
+                snapshot.ExistingHandleIDs.Add(jsStringify.HandleID);
+                snapshot.ExistingObjectIDs.Add(jsStringify.ObjectID);
+                snapshot.ExistingObjectHandles.Add(jsStringify);
 
-            for (var i = 0; i < _Objects.Count; i++)
-            {
-                var rootableRef = _Objects[i]; 
-                if (rootableRef != null && !snapshot.ExistingObjectIDs.Contains(i)) {
-                    if (!rootableRef.RootedHandle.IsEmpty) { 
-                        InternalHandle h = rootableRef.RootedHandle;
-                        leakagesDescObjects += h.Summary + "\n";
+                for (var i = 0; i < _HandleProxies.Length; i++)
+                {
+                    var hProxy = _HandleProxies[i];
+                    if (hProxy != null)
+                    {
+                        bool leaked = !hProxy->IsDisposed && !snapshot.ExistingHandleIDs.Contains(i);
+                        bool gone = hProxy->IsDisposed && snapshot.ExistingHandleIDs.Contains(i);
+
+                        if (leaked || gone) {
+                            var h = new InternalHandle(hProxy, false);
+                            leakagesDescHandles += LeakageDesc(h, leaked, jsStringify);
+                        }
                     }
-                    else {
-                        leakagesDescObjects += $"objectID={i}\n";
+                }
+
+                for (var i = 0; i < _Objects.Count; i++)
+                {
+                    var rootableRef = _Objects[i]; 
+
+                    bool leaked = rootableRef != null && !snapshot.ExistingObjectIDs.Contains(i);
+                    bool gone = rootableRef == null && snapshot.ExistingObjectIDs.Contains(i);
+
+                    if (leaked || gone) {
+                        InternalHandle h = InternalHandle.Empty;
+                        if (leaked) {
+                            h = ((V8NativeObject)rootableRef.Target)?._ ?? InternalHandle.Empty;
+                            if (h.IsEmpty && !rootableRef.RootedHandle.IsEmpty) { 
+                                leakagesDescObjects += $"Target is null: ";
+                                h = rootableRef.RootedHandle;
+                            }
+                        }
+                        else {
+                            h = snapshot.ExistingObjectHandles.ElementAt(snapshot.ExistingObjectIDs.IndexOf(i));
+                        }
+
+                        if (!h.IsEmpty) {
+                            leakagesDescObjects += LeakageDesc(h, leaked, jsStringify);
+                        }
+                        else {
+                            leakagesDescObjects += $"objectID={i}\n";
+                        }
                     }
                 }
             }
@@ -1108,6 +1149,25 @@ namespace V8.Net
             if (leakagesDesc != "") {
                 throw new InvalidOperationException($"Memory snapshot {name}: " + leakagesDesc);
             }
+        }
+
+        public string LeakageDesc(InternalHandle h, bool leaked, InternalHandle jsStringify)
+        {
+            string leakagesDesc = "";
+            string summary = h.Summary;
+            string errorKind = leaked ? "Leakage" : "Destroyed";
+            leakagesDesc += $"{errorKind}: {summary}";
+
+            //if (false) 
+            {
+                using (var jsStrValue = jsStringify.StaticCall(h)) {
+                    leakagesDesc += $", value={jsStrValue.AsString}";
+                }
+                ForceV8GarbageCollection();
+            }
+
+            leakagesDesc += "\n";
+            return leakagesDesc;
         }
     }
 

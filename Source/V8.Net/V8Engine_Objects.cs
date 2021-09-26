@@ -166,8 +166,8 @@ namespace V8.Net
                 return null;
 
             using (_ObjectsLocker.ReadLock()) { 
-                var cref = _Objects[objectID]; 
-                return (V8NativeObject)cref?.Target; 
+                var rootableRef = _Objects[objectID]; 
+                return (V8NativeObject)rootableRef?.Target; 
             }
         }
 

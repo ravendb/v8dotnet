@@ -1874,6 +1874,7 @@ namespace V8.Net
 
             base.OnDispose();
         }
+
         /// <summary>
         ///     Gets or sets the type of the object that this binder will work with. Once this is set it cannot be changed.
         /// </summary>

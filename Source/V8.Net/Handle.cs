@@ -232,7 +232,14 @@ namespace V8.Net
 
         public string Summary {
             get {
-                return _HandleProxy != null ? _HandleProxy->Summary + $", refCount={RefCount}, isRooted={IsRooted}" : null;
+                string descObject = "";
+                if (IsObject) {
+                    descObject = $", ObjectType={Object?.GetType()}, {Object?.Summary()}";
+                }
+               if (IsBinder) {
+                    descObject = $", BoundObjectType={BoundObject?.GetType()}";
+                }
+                return _HandleProxy != null ? _HandleProxy->Summary + $", refCount={RefCount}, isRooted={IsRooted}{descObject}" : null;
             }
         }
 

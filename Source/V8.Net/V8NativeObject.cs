@@ -77,9 +77,10 @@ namespace V8.Net
         {
             IsLocked = false;
         }
-        public virtual void OnEngineRootedStatusChange(bool isRooted)
+
+        public virtual string Summary()
         {
-            return;
+            return "";
         }
 
         new public V8NativeObject Object { get { return this; } }
