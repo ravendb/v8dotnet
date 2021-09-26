@@ -235,9 +235,9 @@ namespace V8.Net
                 string descObject = "";
                 if (IsObject) {
                     descObject = $", ObjectType={Object?.GetType()}, {Object?.Summary()}";
-                }
-               if (IsBinder) {
-                    descObject = $", BoundObjectType={BoundObject?.GetType()}";
+                    if (IsBinder) {
+                        descObject += $", BoundObjectType={BoundObject?.GetType()}";
+                    }
                 }
                 return _HandleProxy != null ? _HandleProxy->Summary + $", refCount={RefCount}, isRooted={IsRooted}{descObject}" : null;
             }
