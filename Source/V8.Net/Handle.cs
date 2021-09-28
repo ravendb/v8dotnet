@@ -180,6 +180,7 @@ namespace V8.Net
 
         HandleProxy* INativeHandleBased.GetNativeHandleProxy()
         {
+            _Handle.KeepAlive();
             return (HandleProxy*)_Handle;
         }
 
@@ -665,6 +666,9 @@ namespace V8.Net
                 Engine?.Reset(handleID);
 
                 if (!_HandleProxy->IsCLRDisposed) {
+                    if (IsArray || IsObject) { //(Engine.IsObjectRooted(ObjectID)) {
+                        Engine.ManagedSideHasDisposedHandles = true;
+                    }
                     _HandleProxy->ManagedReference = 1; // (can now dispose, so downgrade this just in case)
                     // DO NOT clear '_HandleProxy->_ObjectID' as the engine needs it to clear references on it's end, if an object existed)
                     _HandleProxy->Disposed |= 2; // (flag that the managed side is done with it)
@@ -690,7 +694,7 @@ namespace V8.Net
 
             if (CanDispose)
             {
-                ForceDispose(false, false); 
+                ForceDispose(false, false);
                 return true;
             }
             else if (!ignoreErrors)
@@ -1830,6 +1834,7 @@ namespace V8.Net
 
         HandleProxy* INativeHandleBased.GetNativeHandleProxy()
         {
+            KeepAlive();
             return (HandleProxy*)this;
         }
 

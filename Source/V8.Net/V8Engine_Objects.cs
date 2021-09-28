@@ -240,7 +240,7 @@ namespace V8.Net
                 }
             }
             if (!h.IsEmpty) {
-                return h.TryDispose(); 
+                return h.TryDispose();
             }
             else {
                 return true;
