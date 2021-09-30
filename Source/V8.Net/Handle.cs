@@ -235,10 +235,14 @@ namespace V8.Net
             get {
                 string descObject = "";
                 if (IsObject) {
-                    descObject = $", ObjectType={Object?.GetType()}, {Object?.Summary()}";
+                    descObject = $", ObjectType={_Object?.GetType()}";
                     if (IsBinder) {
                         descObject += $", BoundObjectType={BoundObject?.GetType()}";
                     }
+#if DEBUG
+                    if (Object is IV8DebugInfo info)
+                        descObject += info.Summary;
+#endif
                 }
                 return _HandleProxy != null ? _HandleProxy->Summary + $", refCount={RefCount}, isRooted={IsRooted}{descObject}" : null;
             }
@@ -349,15 +353,18 @@ namespace V8.Net
                 if (engine != null)
                 {
                     bool isObjectPresent = _Object != null;
-                    if (!isObjectPresent)
+                    if (!isObjectPresent) {
                         _Object = Object; // (always check first if there is an associated managed object that should be used)
+                        isObjectPresent = _Object != null;
+                    }
 
                     var handleID = _HandleProxy->ID;
                     cref = handleID >= 0 && handleID < engine._TrackerHandles.Length ? engine._TrackerHandles[handleID] : null; // (first check if one already exists and return that)
-                    Handle h = (Handle)cref?.Target;
+                    Handle h = cref?.Target as Handle;
                     if (h != null) {
-                        if (!isObjectPresent) {}
+                        if (!isObjectPresent) {
                             _Object = h;
+                        }
                     }
                     else if (createIfMissing)
                     {
@@ -372,6 +379,7 @@ namespace V8.Net
                         }
                         else {
                             cref = engine._TrackerHandles[handleID] = new CountedReference(h);
+                            GC.SuppressFinalize(cref);
                         }
                         if (!isObjectPresent)
                             _Object = h;
@@ -477,10 +485,16 @@ namespace V8.Net
 
         private InternalHandle _Set(InternalHandle h)
         {
-            _Set(h._HandleProxy);
-            if (_Object == null && h._Object != null) {
+            if (_HandleProxy != h._HandleProxy)
+            {
+                if (_HandleProxy != null)
+                    Dispose();
+                this = h;
+            }
+            else if (_Object == null && h._Object != null) {
                 _Object = h._Object;
             }
+            //_Set(h._HandleProxy);*/
             return this;
         }
 
@@ -893,8 +907,10 @@ namespace V8.Net
         {
             get
             {
-                if (_Object != null)
-                    return _Object as V8NativeObject;
+                if (_Object != null) {
+                    var res = _Object as V8NativeObject;
+                    return res;
+                }
                 else if (_HandleProxy != null && _HandleProxy->_ObjectID >= 0 && Engine != null)
                     return Engine._GetExistingObject(_HandleProxy->_ObjectID);
                 return null;
