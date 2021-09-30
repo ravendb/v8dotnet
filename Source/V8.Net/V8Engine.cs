@@ -282,6 +282,13 @@ namespace V8.Net
 
                 // ... clear all handles of object IDs for disposal ...
 
+
+                for (var i = 0; i < _TrackerHandles.Length; i++)
+                {
+                    var cref = _TrackerHandles[i];
+                    cref?.Dispose();
+                }
+
                 HandleProxy* hProxy;
 
                 for (var i = 0; i < _HandleProxies.Length; i++)
@@ -1018,13 +1025,11 @@ namespace V8.Net
             public List<Int32> ExistingHandleIDs;
             public List<Int32> ExistingObjectIDs;
 
-            public List<Int32> ChildHandleIDs;
-            public List<InternalHandle> SuspectedToLeakHandles;
-            //public List<InternalHandle> ExistingObjectHandles;
+            public Dictionary<Int32, int> ChildHandleIDs;
 
-            public MemorySnapshot()
+            public MemorySnapshot(V8Engine engine)
             {
-                Reset();
+                Init(engine);
             }
 
             public void Reset()
@@ -1039,21 +1044,35 @@ namespace V8.Net
                 else
                     ExistingObjectIDs.Clear();
 
-                /*if (ExistingObjectHandles == null)
-                    ExistingObjectHandles = new List<InternalHandle>();
-                else
-                    ExistingObjectHandles.Clear();*/
-
                 if (ChildHandleIDs == null)
-                    ChildHandleIDs = new List<Int32>();
+                    ChildHandleIDs = new Dictionary<Int32, int>();
                 else
                     ChildHandleIDs.Clear();
+            }
 
-                if (SuspectedToLeakHandles == null)
-                    SuspectedToLeakHandles = new List<InternalHandle>();
-                else
-                    SuspectedToLeakHandles.Clear();
+            public void Init(V8Engine engine) 
+            {
+                Reset();
 
+                for (var i = 0; i < engine._HandleProxies.Length; i++)
+                {
+                    var hProxy = engine._HandleProxies[i];
+                    if (hProxy != null && !hProxy->IsCLRDisposed)
+                    {
+                        ExistingHandleIDs.Add(i);
+                    }
+                }
+
+                for (var i = 0; i < engine._Objects.Count; i++)
+                {
+                    var rootableRef = engine._Objects[i]; 
+                    if (rootableRef != null) {
+                        InternalHandle h = ((V8NativeObject)rootableRef.Target)?._ ?? InternalHandle.Empty;
+                        if (!h.IsEmpty) {
+                            ExistingObjectIDs.Add(i);
+                        }
+                    }
+                }
             }
         }
 
@@ -1064,40 +1083,15 @@ namespace V8.Net
             if (MemorySnapshots == null)
                 MemorySnapshots = new Dictionary<string, MemorySnapshot>();
 
-            MemorySnapshot snapshot = null;
-            if (MemorySnapshots?.TryGetValue(name, out snapshot) == true &&
-                snapshot != null)
+            MemorySnapshot snapshotBefore = null;
+            if (MemorySnapshots?.TryGetValue(name, out snapshotBefore) == true &&
+                snapshotBefore != null)
             {
-                snapshot.Reset();
+                snapshotBefore.Init(this);
             }
             else {
-                snapshot = new MemorySnapshot();
-                MemorySnapshots[name] = snapshot;
-            }
-
-            for (var i = 0; i < _HandleProxies.Length; i++)
-            {
-                var hProxy = _HandleProxies[i];
-                if (hProxy != null && !hProxy->IsCLRDisposed)
-                {
-                    snapshot.ExistingHandleIDs.Add(i);
-                }
-            }
-
-            for (var i = 0; i < _Objects.Count; i++)
-            {
-                var rootableRef = _Objects[i]; 
-                if (rootableRef != null) {
-                    InternalHandle h = ((V8NativeObject)rootableRef.Target)?._ ?? InternalHandle.Empty;
-                    if (h.IsEmpty && !rootableRef.RootedHandle.IsEmpty) { 
-                        h = rootableRef.RootedHandle;
-                    }
-
-                    if (!h.IsEmpty) {
-                        snapshot.ExistingObjectIDs.Add(i);
-                        //snapshot.ExistingObjectHandles.Add(h);
-                    }
-                }
+                snapshotBefore = new MemorySnapshot(this);
+                MemorySnapshots[name] = snapshotBefore;
             }
         }
 
@@ -1108,11 +1102,11 @@ namespace V8.Net
             if (MemorySnapshots == null)
                 MemorySnapshots = new Dictionary<string, MemorySnapshot>();
                 
-            MemorySnapshot snapshot = null;
-            if (!(MemorySnapshots?.TryGetValue(name, out snapshot) == true &&
-                snapshot != null))
+            MemorySnapshot snapshotBefore = null;
+            if (!(MemorySnapshots?.TryGetValue(name, out snapshotBefore) == true &&
+                snapshotBefore != null))
             {
-                throw new InvalidOperationException($"CheckForMemoryLeaks: No snapshot named {name} exists");
+                throw new InvalidOperationException($"CheckForMemoryLeaks: No snapshotBefore named {name} exists");
             }
 
             string leakagesDescHandles = "";
@@ -1120,38 +1114,38 @@ namespace V8.Net
             string leakagesDescSubobjects = "";
             using (var jsStringify = this.Execute("JSON.stringify", "JSON.stringify", true, 0))
             {
-                snapshot.ExistingHandleIDs.Add(jsStringify.HandleID);
-                snapshot.ExistingObjectIDs.Add(jsStringify.ObjectID);
-                //snapshot.ExistingObjectHandles.Add(jsStringify);
+                snapshotBefore.ExistingHandleIDs.Add(jsStringify.HandleID);
+                snapshotBefore.ExistingObjectIDs.Add(jsStringify.ObjectID);
 
-                for (var i = 0; i < _HandleProxies.Length; i++)
+                var snapshotAfter = new MemorySnapshot(this);
+                
+                foreach (var i in snapshotAfter.ExistingHandleIDs)
                 {
                     var hProxy = _HandleProxies[i];
                     if (hProxy != null)
                     {
-                        bool leaked = !hProxy->IsCLRDisposed && !snapshot.ExistingHandleIDs.Contains(i);
-                        bool gone = false; //hProxy->IsCLRDisposed && snapshot.ExistingHandleIDs.Contains(i);
-
-                        if (leaked || gone) {
-                            var h = new InternalHandle(hProxy, false);
-                            InternalHandle uph = _GetUltimateNonDisposedParent(snapshot, h);
-                            if (/*!uph.IsCLRDisposed */ uph.HandleID == h.HandleID && !(h.IsRooted && h.RefCount == 1)) {
-                                if ((h.IsBinder && h.BoundObject != null) || h.RefCount > 1) {
-                                    leakagesDescHandles += _LeakageDesc(h, leaked, jsStringify);
-                                }
-                                else {
-                                    snapshot.SuspectedToLeakHandles.Add(h);
-                                }
-                            }
-                            ForceV8GarbageCollection(); // here the suspected handle may be disposed by V8
-                        }
+                        var h = new InternalHandle(hProxy, false);
+                        _GatherChilds(snapshotAfter, ref h);
                     }
                 }
+                ForceV8GarbageCollection(); // here the suspected handle may be disposed by V8 so we skip them if this has happened
 
-                foreach (InternalHandle h in snapshot.SuspectedToLeakHandles) 
+                foreach (var i in snapshotAfter.ExistingHandleIDs)
                 {
-                    if (!h.IsCLRDisposed && !snapshot.ChildHandleIDs.Contains(h.HandleID)) {
-                        leakagesDescHandles += _LeakageDesc(h, true, jsStringify);                        
+                    var hProxy = _HandleProxies[i];
+                    if (hProxy != null)
+                    {
+                        bool isLeaked = !hProxy->IsCLRDisposed && !snapshotBefore.ExistingHandleIDs.Contains(i);
+                        if (isLeaked) {
+                            var h = new InternalHandle(hProxy, false);
+                            int refDiscount = h.IsRooted ? 1 : 0; //kvp.Value;
+                            if (!h.IsCLRDisposed) {
+                                int countParents = 0;
+                                snapshotAfter.ChildHandleIDs.TryGetValue(h.HandleID, out countParents);
+                                if (h.RefCount > refDiscount + countParents)
+                                    leakagesDescHandles += _LeakageDesc(h, true, jsStringify);                        
+                            }
+                        }
                     }
                 }
 
@@ -1160,29 +1154,28 @@ namespace V8.Net
                     objectsCount = _Objects.Count;
                 }
 
-                for (var i = 0; i < objectsCount; i++)
+                foreach (var i in snapshotAfter.ExistingObjectIDs)
                 {
                     V8NativeObject no = _GetExistingObject(i);
-                    bool leaked = no != null && !snapshot.ExistingObjectIDs.Contains(i);
-                    bool gone = false; //rootableRef == null && snapshot.ExistingObjectIDs.Contains(i);
-
-                    if (leaked || gone) {
+                    bool isLeaked = no != null && !snapshotBefore.ExistingObjectIDs.Contains(i);
+                    if (isLeaked) {
                         InternalHandle h = InternalHandle.Empty;
-                        if (leaked) {
+                        if (isLeaked) {
                             h = no._;
                         }
-                        /*else {
-                            h = snapshot.ExistingObjectHandles.ElementAt(snapshot.ExistingObjectIDs.IndexOf(i));
-                        }*/
 
-                        if (!h.IsEmpty) {
-                            InternalHandle uph = _GetUltimateNonDisposedParent(snapshot, h);
-                            if (uph.HandleID == h.HandleID && !(h.IsRooted && h.RefCount == 1)) {
-                                leakagesDescObjects += _LeakageDesc(h, leaked, jsStringify);
+                        if (!h.IsCLRDisposed) {
+                            if (!h.IsEmpty) {
+                                int refDiscount = h.IsRooted ? 1 : 0;
+                                int countParents = 0;
+                                snapshotAfter.ChildHandleIDs.TryGetValue(h.HandleID, out countParents);
+
+                                if (h.RefCount > refDiscount + countParents)
+                                    leakagesDescObjects += _LeakageDesc(h, true, jsStringify);                        
                             }
-                        }
-                        else {
-                            leakagesDescObjects += $"objectID={i}\n";
+                            else {
+                                leakagesDescObjects += $"objectID={i}\n";
+                            }
                         }
                     }
                 }
@@ -1190,10 +1183,10 @@ namespace V8.Net
 
             string leakagesDesc = "";
             if (leakagesDescHandles != "") {
-                leakagesDesc += "Leaked internal handles:\n" + leakagesDescHandles;
+                leakagesDesc += "\nLeaked internal handles:\n" + leakagesDescHandles;
             }
             if (leakagesDescObjects != "") {
-                leakagesDesc += "Leaked managed objects:\n" + leakagesDescObjects;
+                leakagesDesc += "\nLeaked managed objects:\n" + leakagesDescObjects;
             }
 
             if (leakagesDesc != "") {
@@ -1201,36 +1194,66 @@ namespace V8.Net
             }
         }
 
-        private InternalHandle _GetUltimateNonDisposedParent(MemorySnapshot snapshot, InternalHandle h)
+        /*private InternalHandle _GetUltimateNonDisposedParent(MemorySnapshot snapshotBefore, ref InternalHandle h)
         {
             //InternalHandle res = h;
-            while(h.RefCount == 1 && h.IsBinder && h.BoundObject is IV8TreeNode pid && pid != null)
+            while (!h.IsCLRDisposed && h.IsObjectType && h.RefCount >= 1)
             {
-                List<V8EntityID> childIDs = pid.ChildIDs;
-                if (childIDs != null /*&& !h.IsCLRDisposed*/) {
-                    foreach (var childID in childIDs) {
-                        var childHandleID = childID.HandleID;
-                        if (!snapshot.ChildHandleIDs.Contains(childHandleID))
-                            snapshot.ChildHandleIDs.Add(childHandleID);
-                    }
+                object obj = null;
+                if (h.IsBinder) {
+                    obj = h.BoundObject;
                 }
-
-                if (pid.ParentID.ObjectID < 0  || snapshot.ExistingObjectIDs.Contains(pid.ParentID.ObjectID))
+                else {
+                    obj = h.Object;
+                }
+                IV8DebugInfo di = obj as IV8DebugInfo;
+                if (di == null)
                     break;
-                V8NativeObject pno = _GetExistingObject(pid.ParentID.ObjectID);
+
+                if (di.ParentID == null || di.ParentID.ObjectID < 0  || snapshotBefore.ExistingObjectIDs.Contains(di.ParentID.ObjectID))
+                    break;
+                V8NativeObject pno = _GetExistingObject(di.ParentID.ObjectID);
                 if (pno == null)
                     break;
                 h = pno._;
+                ForceV8GarbageCollection();
             }
             return h;
+        }*/
+
+        private void _GatherChilds(MemorySnapshot snapshotBefore, ref InternalHandle h)
+        {
+            if (!(!h.IsCLRDisposed && h.IsObjectType && h.RefCount >= 1))
+                return;
+
+            object obj = null;
+            if (h.IsBinder) {
+                obj = h.BoundObject;
+            }
+            else {
+                obj = h.Object;
+            }
+            IV8DebugInfo di = obj as IV8DebugInfo;
+            if (di == null)
+                return;
+
+            List<V8EntityID> childIDs = di.ChildIDs;
+            if (childIDs != null && !h.IsCLRDisposed) {
+                foreach (var childID in childIDs) {
+                    var childHandleID = childID.HandleID;
+                    int countParents = 0;
+                    snapshotBefore.ChildHandleIDs.TryGetValue(childHandleID, out countParents);
+                    snapshotBefore.ChildHandleIDs[childHandleID] = countParents + 1;
+                }
+            }
         }
 
 
-        private string _LeakageDesc(InternalHandle h, bool leaked, InternalHandle jsStringify)
+        private string _LeakageDesc(InternalHandle h, bool isLeaked, InternalHandle jsStringify)
         {
             string leakagesDesc = "";
             string summary = h.Summary;
-            string errorKind = leaked ? "Leakage" : "Destroyed";
+            string errorKind = isLeaked ? "Leakage" : "Destroyed";
             leakagesDesc += $"{errorKind}: {summary}";
 
             if (false) 
@@ -1269,10 +1292,12 @@ namespace V8.Net
         }
     }
 
-    public interface IV8TreeNode
+    public interface IV8DebugInfo
     {
+        V8EntityID SelfID {get; set;}
         V8EntityID ParentID {get;}
         List<V8EntityID> ChildIDs {get;}
+        string Summary {get;}
     }
 
     // ========================================================================================================================
