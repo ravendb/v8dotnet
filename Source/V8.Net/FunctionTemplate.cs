@@ -249,8 +249,8 @@ namespace V8.Net
             // ... get the function's prototype object, wrap it, and give it to the new function object ...
             // (note: this is a special case, because the function object auto generates the prototype object natively using an existing object template)
 
-            var funcProto = V8NetProxy.GetObjectPrototype(func._Handle);
-            func._Prototype.Set(funcProto);
+            using (InternalHandle funcProto = V8NetProxy.GetObjectPrototype(func._Handle))
+                func._Prototype.Set(funcProto);
 
             lock (_FunctionsByType)
             {
