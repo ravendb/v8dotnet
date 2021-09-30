@@ -61,6 +61,9 @@ namespace V8.Net
     /// <para>This class implements 'DynamicObject' to make setting properties a bit easier.</para>
     /// </summary>
     public unsafe class V8NativeObject : Handle, IV8NativeObject, IV8Object, IDynamicMetaObjectProvider
+#if DEBUG
+    , IV8DebugInfo
+#endif
     {
         // --------------------------------------------------------------------------------------------------------------------
 
@@ -70,7 +73,6 @@ namespace V8.Net
         /// </summary>
         new public V8Engine Engine { get { return _Engine ?? (_Engine = _Handle.Engine); } }
         internal V8Engine _Engine;
-
         public bool IsLocked;
 
         public void SetReadyToDisposal()
@@ -78,10 +80,37 @@ namespace V8.Net
             IsLocked = false;
         }
 
-        public virtual string Summary()
+#if DEBUG
+        public V8EntityID SelfID
         {
-            return "";
+            get {
+                return new V8EntityID(_Handle.HandleID, _Handle.ObjectID);
+            } 
+
+            set {} 
         }
+
+        public V8EntityID ParentID
+        {
+            get {return null;} 
+        }
+
+        public List<V8EntityID> ChildIDs
+        {
+            get {
+                var res = new List<V8EntityID>();
+                if (!_Prototype.IsEmpty) {
+                    res.Add(new V8EntityID(_Prototype.HandleID, _Prototype.ObjectID));
+                }
+                return res;
+            } 
+        }
+
+        public string Summary
+        {
+            get {return "";}
+        }
+#endif
 
         new public V8NativeObject Object { get { return this; } }
 
@@ -365,6 +394,7 @@ namespace V8.Net
                 Setter = null;
                 _Setter = null;
 
+                _Prototype.Dispose();
                 // ... reset and dispose the handle ...
 
                 //_Handle.ObjectID = -1; // (resets the object ID on the native side [though this happens anyhow once cached], which also causes the reference to clear)
