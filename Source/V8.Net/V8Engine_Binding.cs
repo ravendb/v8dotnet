@@ -1861,13 +1861,17 @@ namespace V8.Net
                     _Object = value;
                 else
                     throw new InvalidOperationException("Once an object is set, you can only replace the instance with another of the SAME type.");
+
+                if (_Object is IDisposable) {
+                    GC.SuppressFinalize(_Object);
+                }
             }
         }
         internal object _Object;
 
         public override void OnDispose()
         {
-            if (_Object is IDisposable r) {
+            if (Object is IDisposable r) {
                 r.Dispose();
             }
             _Object = null;
