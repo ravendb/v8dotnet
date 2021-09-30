@@ -14,11 +14,11 @@ namespace V8.Net
 {
     // ========================================================================================================================
 
-    public unsafe class WeakReferenceStub
+    public unsafe class Reference
     {
         public object Target;
 
-        public WeakReferenceStub(object target, bool trackResurrection = true)
+        public Reference(object target, bool trackResurrection = true)
         {
             Target = target;
         }
@@ -26,16 +26,39 @@ namespace V8.Net
     }
 
 
-    public unsafe class CountedReference : WeakReferenceStub
+    public unsafe class CountedReference : Reference, IDisposable
     {
         /// <summary> Allows overriding the weak reference by rooting the target object to this entry. </summary>
         private int _RefCount;
         internal const int UndefinedRefCount = -999;
 
+        private bool _disposed = false;
 
         public CountedReference(Handle target, bool trackResurrection = true) : base(target, trackResurrection)
         {
             Reinitialize(target);
+        }
+
+        ~CountedReference()
+        {            
+            Dispose(false);
+        }
+
+        public void Dispose()
+        {  
+            Dispose(true);
+        }
+
+        protected void Dispose(bool disposing)
+        {
+            if (_disposed)
+                return;
+
+            if (disposing) {
+                //GC.SuppressFinalize(this);
+            }
+
+            _disposed = true;
         }
 
         public void Reinitialize(Handle target)
@@ -49,7 +72,7 @@ namespace V8.Net
         {
 #if DEBUG
             if (IsLocked) {
-                InternalHandle h = ((Handle)Target)._;
+                InternalHandle h = (Target as Handle)._;
                 throw new InvalidOperationException($"Can't reinitialize CountedReference: RefCount={_RefCount}, Target.HandleID={h.HandleID}, Target.ValueType={h.ValueType}.");
             }
 #endif
@@ -92,7 +115,7 @@ namespace V8.Net
         {
 #if DEBUG
             if (IsRefCountPresent && _RefCount < 0) {
-                InternalHandle h = ((Handle)Target)._;
+                InternalHandle h = (Target as Handle)._;
                 throw new InvalidOperationException($"Can't Inc CountedReference: RefCount={_RefCount}, Target.HandleID={h.HandleID}, Target.ValueType={h.ValueType}.");
             }
 #endif
@@ -105,7 +128,7 @@ namespace V8.Net
         {
 #if DEBUG
             if (IsRefCountPresent && _RefCount <= 0) {
-                InternalHandle h = ((Handle)Target)._;
+                InternalHandle h = (Target as Handle)._;
                 throw new InvalidOperationException($"Can't Dec CountedReference: RefCount={_RefCount}, Target.HandleID={h.HandleID}, Target.ValueType={h.ValueType}.");
             }
 #endif
@@ -118,7 +141,7 @@ namespace V8.Net
 
 
     /// <summary> Allows overriding the weak reference by rooting the target object to this entry. </summary>
-    public unsafe class RootableReference : WeakReferenceStub
+    public unsafe class RootableReference : Reference
     {
         /// <summary> Allows overriding the weak reference by rooting the target object to this entry. </summary>
         public InternalHandle RootedHandle = InternalHandle.Empty;
