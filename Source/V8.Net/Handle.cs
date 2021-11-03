@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Runtime.CompilerServices;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
@@ -187,15 +188,37 @@ namespace V8.Net
         // --------------------------------------------------------------------------------------------------------------------
     }
 
+
+    public interface IInternalHandle :
+        IHandle, IHandleBased, INativeHandleBased,
+        IV8Object, IBasicHandle
+    {
+        bool IsNumberEx { get; }
+
+        bool IsNumberOrIntEx { get; }
+
+        bool IsStringEx { get; }
+
+        void SetPropertyOrThrow(string propertyName, InternalHandle value);
+
+        void DeletePropertyOrThrow(string propertyName);
+
+        bool TryGetValue(string propertyName, out InternalHandle jsRes);
+
+        void FastAddProperty(string name, InternalHandle jsValue, bool writable, bool enumerable, bool configurable);
+
+        IEnumerable<KeyValuePair<string, InternalHandle>> GetOwnProperties();
+
+        IEnumerable<KeyValuePair<string, InternalHandle>> GetProperties();
+    }
+    
     /// <summary>
     /// Keeps track of native V8 handles (C++ native side).
     /// <para>DO NOT STORE THIS HANDLE. Use "Handle" instead (i.e. "Handle h = someInternalHandle;"), or use the value with the "using(someInternalHandle){}" statement.</para>
     /// </summary>
     public unsafe struct InternalHandle :
-        IHandle, IHandleBased, INativeHandleBased,
-        IV8Object,
-        IBasicHandle, // ('IDisposable' will not box in a "using" statement: http://stackoverflow.com/questions/2412981/if-my-struct-implements-idisposable-will-it-be-boxed-when-used-in-a-using-statem)
-        IDynamicMetaObjectProvider
+        IInternalHandle, // ('IDisposable' will not box in a "using" statement: http://stackoverflow.com/questions/2412981/if-my-struct-implements-idisposable-will-it-be-boxed-when-used-in-a-using-statem)
+        IDynamicMetaObjectProvider, IClonable<InternalHandle>, IProperties<InternalHandle>
     {
         // --------------------------------------------------------------------------------------------------------------------
 
@@ -218,6 +241,11 @@ namespace V8.Net
         // --------------------------------------------------------------------------------------------------------------------
 
         internal HandleProxy* _HandleProxy; // (the native proxy struct wrapped by this instance)
+
+        public InternalHandle Clone()
+        {
+            return new InternalHandle(this, true);
+        }
 
         public Int32 HandleID {
             get {
@@ -1685,6 +1713,18 @@ namespace V8.Net
 
         // --------------------------------------------------------------------------------------------------------------------
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public IEnumerable<string> EnumeratePropertyNames()
+        {
+            return GetOwnPropertyNames();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public IEnumerable<string> EnumerateOwnPropertyNames()
+        {
+            return GetPropertyNames();
+        }
+
         /// <summary>
         /// Returns a list of all property names for this object (including all objects in the prototype chain).
         /// </summary>
@@ -1855,6 +1895,97 @@ namespace V8.Net
         }
 
         // --------------------------------------------------------------------------------------------------------------------
+        
+        public bool IsNumberEx
+        {
+            get { return IsNumber || IsNumberObject; }
+        }
+
+        public bool IsNumberOrIntEx
+        {
+            get { return IsNumberEx || IsInt32; }
+        }
+
+        public bool IsStringEx
+        {
+            get { return IsString || IsStringObject; }
+        }
+
+        public void SetPropertyOrThrow(string propertyName, InternalHandle jsValue)
+        {
+            if (SetProperty(propertyName, jsValue) == false)
+                throw new InvalidOperationException($"Failed to set property {propertyName}");
+        }
+
+        public void DeletePropertyOrThrow(string propertyName)
+        {
+            if (DeleteProperty(propertyName) == false)
+                throw new InvalidOperationException($"Failed to delete property {propertyName}");
+        }
+
+        public InternalHandle GetOwnProperty(string name)
+        {
+            return GetProperty(name);
+        }
+
+        public InternalHandle GetOwnProperty(Int32 index)
+        {
+            return GetProperty(index);
+        }
+
+        public IEnumerable<KeyValuePair<string, InternalHandle>> GetOwnProperties()
+        {
+            foreach (var propertyName in EnumerateOwnPropertyNames())
+            {
+                InternalHandle jsProp = GetProperty(propertyName);
+                yield return new KeyValuePair<string, InternalHandle>(propertyName, jsProp);
+            }
+        }
+
+        public IEnumerable<KeyValuePair<string, InternalHandle>> GetProperties()
+        {
+            foreach (var propertyName in EnumeratePropertyNames())
+            {
+                InternalHandle jsProp = GetProperty(propertyName);
+                yield return new KeyValuePair<string, InternalHandle>(propertyName, jsProp);
+            }
+        }
+
+        public bool HasOwnProperty (string name)
+        {
+            return HasProperty(name);
+        }
+
+        public bool HasProperty (string name)
+        {
+            /*var attr = GetPropertyAttributes(name);
+            return attr != V8PropertyAttributes.Undefined;*/
+            /*using (var jsHasOwn = Execute("Object.hasOwn"))
+            {
+                jsHasOwn.StaticCall()
+            }*/
+            using (var jsRes = GetProperty(name))
+                return !jsRes.IsUndefined;
+        }
+
+        public bool TryGetValue(string propertyName, out InternalHandle jsRes)
+        {
+            jsRes = GetProperty(propertyName);
+            if (jsRes.IsUndefined)
+            {
+                jsRes.Dispose();
+                return false;
+            }
+            return true;
+        }
+
+        public void FastAddProperty(string name, InternalHandle jsValue, bool writable, bool enumerable, bool configurable)
+        {
+            if (SetProperty(name, jsValue) == false)
+            {
+                throw new InvalidOperationException($"Failed to fast add property {name}");
+            }
+        }
     }
 
     // ========================================================================================================================

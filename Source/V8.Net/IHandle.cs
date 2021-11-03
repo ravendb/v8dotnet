@@ -21,6 +21,32 @@ namespace V8.Net
 
     // ========================================================================================================================
 
+    public interface IClonable<T>
+    {
+        T Clone();
+    }
+
+    public interface IProperties<T>
+    {
+
+        bool HasOwnProperty (string name);
+
+        bool HasProperty (string name);
+
+        IEnumerable<string> EnumerateOwnPropertyNames();
+
+        IEnumerable<string> EnumeratePropertyNames();
+
+        T GetOwnProperty(string name);
+
+        T GetOwnProperty(Int32 index);
+
+        T GetProperty(string name);
+
+        T GetProperty(Int32 index);
+
+    }
+
     /// <summary>
     /// The basic handle interface is a higher level interface that implements members that can be common to many handle types for various 3rd-party script
     /// implementations.  It's primary purpose is to support the DreamSpace.Net development framework, which can support various scripting engines, and is

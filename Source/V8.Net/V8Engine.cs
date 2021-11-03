@@ -4,6 +4,7 @@
  */
 
 using System;
+using System.Runtime.CompilerServices;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -242,7 +243,7 @@ namespace V8.Net
         ///     (Optional) True to automatically create a global context. If this is false then you must construct a context
         ///     yourself before executing JavaScript or calling methods that require contexts.
         /// </param>
-        public V8Engine(bool autoCreateGlobalContext = true)
+        public V8Engine(bool autoCreateGlobalContext = true, IJsConverter jsConverter = null)
         {
             RunMarshallingTests();
 
@@ -267,6 +268,35 @@ namespace V8.Net
             _Initialize_Handles();
             _Initialize_ObjectTemplate();
             //?_Initialize_Worker(); // (DO THIS LAST!!! - the worker expects everything to be ready)
+
+
+            _jsConverter = jsConverter ?? V8Engine._dummyJsConverter;
+
+            TypeMappers = new Dictionary<Type, Func<object, InternalHandle>>()
+            {
+                {typeof(bool), (v) => CreateValue((bool) v)},
+                {typeof(byte), (v) => CreateValue((byte) v)},
+                {typeof(char), (v) => CreateValue((char) v)},
+                {typeof(TimeSpan), (v) => CreateValue((TimeSpan) v)},
+                {typeof(DateTime), (v) => CreateValue((DateTime) v)},
+                //{typeof(DateTimeOffset), (v) => engine.Realm.Intrinsics.Date.Construct((DateTimeOffset) v)},
+                {typeof(decimal), (v) => CreateValue((double) (decimal) v)},
+                {typeof(double), (v) => CreateValue((double) v)},
+                {typeof(SByte), (v) => CreateValue((Int32) (SByte) v)},
+                {typeof(Int16), (v) => CreateValue((Int32) (Int16) v)}, 
+                {typeof(Int32), (v) => CreateValue((Int32) v)},
+                {typeof(Int64), (v) => CreateIntValue((Int64) v)},
+                {typeof(Single), (v) => CreateValue((double) (Single) v)},
+                {typeof(string), (v) => CreateValue((string) v)},
+                {typeof(UInt16), (v) => CreateUIntValue((UInt16) v)}, 
+                {typeof(UInt32), (v) => CreateUIntValue((UInt32) v)},
+                {typeof(UInt64), (v) => CreateUIntValue((UInt64) v)},
+                {
+                    typeof(System.Text.RegularExpressions.Regex),
+                    (v) => CreateValue((System.Text.RegularExpressions.Regex) v)
+                }
+            };
+
         }
 
         ~V8Engine()
@@ -274,7 +304,7 @@ namespace V8.Net
             Dispose();
         }
 
-        public void Dispose()
+        public virtual void Dispose()
         {
             if (_NativeV8EngineProxy != null)
             {
@@ -1014,6 +1044,52 @@ namespace V8.Net
                 throw new InvalidOperationException($"Create value wrong ref count (not 1): {jsRes.RefCount}");
 #endif
             return jsRes;
+        }
+
+
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void SetGllobalProperty(string name, InternalHandle value, V8PropertyAttributes attributes = V8PropertyAttributes.None)
+        {
+            if (!GlobalObject.SetProperty(name, value, attributes))
+            {
+                throw new InvalidOperationException($"Failed to set global property {name}");
+            }            
+        }
+
+        public InternalHandle CreateCLRCallBack(JSFunction func, bool keepAlive = true)
+        {
+            var jsFunc = CreateFunctionTemplate().GetFunctionObject<V8Function>(func)._;
+            if (keepAlive)
+                jsFunc.KeepAlive();
+            return jsFunc;
+        }
+
+        public void SetGlobalCLRCallBack(string propertyName, JSFunction func)
+        {
+            var jsFunc = CreateCLRCallBack(func, true);
+            SetGllobalProperty(propertyName, jsFunc);
+        }
+
+        public static void Dispose(InternalHandle[] jsItems)
+        {
+            for (int i = 0; i < jsItems.Length; ++i)
+            {
+                jsItems[i].KeepAlive().Dispose();
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public InternalHandle CreateEmptyArray()
+        {
+            return CreateArray(Array.Empty<InternalHandle>());
+        }
+
+        public InternalHandle CreateArrayWithDisposal(InternalHandle[] jsItems)
+        {
+            var jsArr = CreateArray(jsItems);
+            Dispose(jsItems);
+            return jsArr;
         }
 
         // --------------------------------------------------------------------------------------------------------------------
