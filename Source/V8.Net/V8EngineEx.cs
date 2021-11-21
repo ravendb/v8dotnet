@@ -1,4 +1,5 @@
-﻿using System;
+﻿#nullable enable
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks; 
@@ -39,6 +40,7 @@ namespace V8.Net
         private IJsConverter _jsConverter;
 
         protected Dictionary<Type, Func<object, InternalHandle>> TypeMappers;
+
 
         internal InternalHandle CreateUIntValue(uint v)
         {
@@ -210,12 +212,12 @@ namespace V8.Net
         {
             //engine?.ForceV8GarbageCollection();
 
-            // TODO need something ???
+            // there is no need to do something as V8 doesn't have intermediate state of callstack
         }
 
         public void ResetConstraints()
         {
-            // TODO need something ???
+            // there is no need to do something as V8 doesn't have intermediate state of timer
         }
 
         private int RefineMaxDuration(int timeout)

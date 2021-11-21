@@ -1057,7 +1057,7 @@ namespace V8.Net
             }            
         }
 
-        public InternalHandle CreateCLRCallBack(JSFunction func, bool keepAlive = true)
+        public InternalHandle CreateClrCallBack(JSFunction func, bool keepAlive = true)
         {
             var jsFunc = CreateFunctionTemplate().GetFunctionObject<V8Function>(func)._;
             if (keepAlive)
@@ -1065,9 +1065,9 @@ namespace V8.Net
             return jsFunc;
         }
 
-        public void SetGlobalCLRCallBack(string propertyName, JSFunction func)
+        public void SetGlobalClrCallBack(string propertyName, JSFunction func)
         {
-            var jsFunc = CreateCLRCallBack(func, true);
+            var jsFunc = CreateClrCallBack(func, true);
             SetGllobalProperty(propertyName, jsFunc);
         }
 
