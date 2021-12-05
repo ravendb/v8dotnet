@@ -73,6 +73,8 @@ namespace V8.Net
             {
                 var type = obj.GetType();
                 tb = GetTypeBinder(type);
+                if (tb == null)
+                    throw new InvalidOperationException($"No TypeBinder found for type {nameof(type)}");
             }
 
             ObjectBinder binder = tb.CreateObjectBinder<TObjectBinder, object>(obj, true, keepAlive: keepAlive);
