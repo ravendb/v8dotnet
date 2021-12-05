@@ -1,4 +1,4 @@
-﻿/* All V8.NET source is governed by the LGPL licensing model. Please keep these comments intact, thanks.
+/* All V8.NET source is governed by the LGPL licensing model. Please keep these comments intact, thanks.
  * Developer: James Wilkins (jameswilkins.net).
  * Source, Documentation, and Support: https://v8dotnet.codeplex.com
  */
@@ -1047,28 +1047,12 @@ namespace V8.Net
         }
 
 
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void SetGllobalProperty(string name, InternalHandle value, V8PropertyAttributes attributes = V8PropertyAttributes.None)
-        {
-            if (!GlobalObject.SetProperty(name, value, attributes))
-            {
-                throw new InvalidOperationException($"Failed to set global property {name}");
-            }            
-        }
-
         public InternalHandle CreateClrCallBack(JSFunction func, bool keepAlive = true)
         {
             var jsFunc = CreateFunctionTemplate().GetFunctionObject<V8Function>(func)._;
             if (keepAlive)
                 jsFunc.KeepAlive();
             return jsFunc;
-        }
-
-        public void SetGlobalClrCallBack(string propertyName, JSFunction func)
-        {
-            var jsFunc = CreateClrCallBack(func, true);
-            SetGllobalProperty(propertyName, jsFunc);
         }
 
         public static void Dispose(InternalHandle[] jsItems)
