@@ -2,6 +2,16 @@
 
 #include "ProxyTypes.h"
 #include <experimental/filesystem>
+//#include "V8/v8/src/heap/heap-inl.h"
+//#include "src/common/globals.h"
+
+//constexpr size_t KB = 1024;
+//constexpr size_t MB = KB * KB;
+//constexpr size_t GB = KB * MB;
+constexpr int KB = 1024;
+constexpr int MB = KB * 1024;
+constexpr int GB = MB * 1024;
+constexpr int64_t TB = static_cast<int64_t>(GB) * 1024;
 
 // ------------------------------------------------------------------------------------------------------------------------
 
@@ -93,6 +103,11 @@ V8EngineProxy::V8EngineProxy(bool enableDebugging, DebugMessageDispatcher* debug
 	}
 
 	Isolate::CreateParams params;
+	ResourceConstraints& constraints = params.constraints;
+	//constraints.ConfigureDefaults();
+	constraints.ConfigureDefaultsFromHeapSize(10 * KB, 10 * GB);
+	constraints.set_code_range_size_in_bytes(9 * GB);
+
 	params.array_buffer_allocator = v8::ArrayBuffer::Allocator::NewDefaultAllocator();
 	_Isolate = Isolate::New(params);
 
@@ -109,6 +124,19 @@ V8EngineProxy::V8EngineProxy(bool enableDebugging, DebugMessageDispatcher* debug
 	_ManagedV8GarbageCollectionRequestCallback = nullptr;
 
 	_Isolate->SetData(0, this); // (sets a reference in the isolate to the proxy [useful within callbacks])
+	//Heap* heap = _Isolate->heap();
+	auto nearHeapLimitCallback = [](void* heap, size_t current_heap_limit, size_t initial_heap_limit) -> size_t
+	{
+		//reinterpret_cast<Heap*>(heap)->set_force_oom(false);
+		auto step = current_heap_limit * 2;
+		if (step > 10 * MB) {
+			step = 10 * MB;
+		}
+		auto limit = current_heap_limit + step;
+		printf("\nnearHeapLimitCallback\n%s\n", limit);
+		return limit;
+	};
+	_Isolate->AddNearHeapLimitCallback(nearHeapLimitCallback, nullptr);
 
 	if ((std::vector<bool>::size_type)_NextEngineID >= _DisposedEngines.capacity())
 		_DisposedEngines.resize(_DisposedEngines.capacity() + 32);
