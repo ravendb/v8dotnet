@@ -587,7 +587,7 @@ HandleProxy* V8EngineProxy::Execute(const uint16_t* script, uint16_t* sourceName
 
 		if (sourceName == nullptr) sourceName = (uint16_t*)L"";
 
-		ScriptOrigin origin(ToLocalThrow(NewUString(sourceName)));
+		ScriptOrigin origin(_Isolate, ToLocalThrow(NewUString(sourceName)));
 		auto compiledScript = Script::Compile(_Context, ToLocalThrow(NewUString(script)), &origin);
 
 		if (__tryCatch.HasCaught())
@@ -652,7 +652,7 @@ HandleProxy* V8EngineProxy::Compile(const uint16_t* script, uint16_t* sourceName
 
 		auto hScript = ToLocalThrow(NewUString(script));
 
-		ScriptOrigin origin(ToLocalThrow(NewUString(sourceName)));
+		ScriptOrigin origin(_Isolate, ToLocalThrow(NewUString(sourceName)));
 
 		auto compiledScript = Script::Compile(_Context, hScript, &origin);
 
