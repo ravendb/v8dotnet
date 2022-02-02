@@ -5,13 +5,11 @@
 //#include "V8/v8/src/heap/heap-inl.h"
 //#include "src/common/globals.h"
 
-//constexpr size_t KB = 1024;
-//constexpr size_t MB = KB * KB;
-//constexpr size_t GB = KB * MB;
 constexpr int KB = 1024;
 constexpr int MB = KB * 1024;
 constexpr int GB = MB * 1024;
 constexpr int64_t TB = static_cast<int64_t>(GB) * 1024;
+static constexpr size_t kPageSize = size_t{1} << 17;
 
 // ------------------------------------------------------------------------------------------------------------------------
 
@@ -107,6 +105,8 @@ V8EngineProxy::V8EngineProxy(bool enableDebugging, DebugMessageDispatcher* debug
 	//constraints.ConfigureDefaults();
 	constraints.ConfigureDefaultsFromHeapSize(10 * KB, 10 * GB);
 	constraints.set_code_range_size_in_bytes(9 * GB);
+	constraints.set_initial_young_generation_size_in_bytes(MB);
+	//constraints.set_initial_old_generation_size_in_bytes(MB);
 
 	params.array_buffer_allocator = v8::ArrayBuffer::Allocator::NewDefaultAllocator();
 	_Isolate = Isolate::New(params);
