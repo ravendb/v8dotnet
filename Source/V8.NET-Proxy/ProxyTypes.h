@@ -50,8 +50,8 @@
 
 #include <functional>
 #include <libplatform/libplatform.h>
-#include "Inspector.h"
-#include "v8_inspector_listener_impl.h"
+//#include "Inspector.h"
+//#include "v8_inspector_listener_impl.h"
 
 #if _WIN32 || _WIN64
 #pragma comment(lib, "v8_monolith.lib")
@@ -785,8 +785,8 @@ protected:
 	CopyablePersistent<v8::Object> _GlobalObject; // (taken from the context)
 	ManagedV8GarbageCollectionRequestCallback _ManagedV8GarbageCollectionRequestCallback;
 
-	const static int32_t _InspectorPort = 9000;
-	std::unique_ptr<Inspector> _Inspector = nullptr;
+	//const static int32_t _InspectorPort = 9000;
+	//std::unique_ptr<Inspector> _Inspector = nullptr;
 
 	std::vector<_StringItem> _Strings; // An array (cache) of string buffers to reuse when marshalling strings.
 

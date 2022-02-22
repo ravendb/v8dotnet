@@ -15,7 +15,7 @@ set(BOOST_BEAST_INCLUDE "usr/include" PATH "Path to the Boost.Beast include dir.
 include_directories(
     V8/v8/
     V8/v8/include
-    debugging/
+    #debugging/
     #V8/v8/outecho .gn/x64.release/obj/third_party/icu
     #V8/v8/out.gn/x64.release/obj/src/inspector
     #V8/v8/out.gn/x64.release/obj
