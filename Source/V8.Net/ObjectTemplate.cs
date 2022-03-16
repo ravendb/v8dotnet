@@ -129,8 +129,17 @@ namespace V8.Net
                 if (mo == null)
                     return null;
 
-                using (var jsRes = mo.NamedPropertyGetter(ref propertyName).KeepAlive()) 
+                var jsRes = mo.NamedPropertyGetter(ref propertyName).KeepAlive();
+                int minRefCount = 1 + (jsRes.IsRooted ? 1 : 0);
+                if (jsRes.RefCount >= minRefCount)
+                {
+                    jsRes.Dec(); // TODO [shlomo] to switch on
                     return jsRes;
+                }
+                else
+                {
+                    return jsRes;
+                }
             }
             catch (Exception ex)
             {
