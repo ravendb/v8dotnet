@@ -4,6 +4,77 @@
 #include <experimental/filesystem>
 //#include "V8/v8/src/heap/heap-inl.h"
 //#include "src/common/globals.h"
+//#include "timezone.h"
+#include "unicode/timezone.h"
+#include "node_utils.h"
+#include <time.h>  // tzset(), _tzset()
+
+#if U_CHARSET_FAMILY==U_ASCII_FAMILY
+#define CHAR_TO_UCHAR(c) c
+#define UCHAR_TO_CHAR(c) c
+#elif U_CHARSET_FAMILY==U_EBCDIC_FAMILY
+#define CHAR_TO_UCHAR(u) asciiFromEbcdic[u]
+#define UCHAR_TO_CHAR(u) ebcdicFromAscii[u]
+#else
+#   error U_CHARSET_FAMILY is not valid
+#endif
+
+U_CAPI void U_EXPORT2
+u_charsToUChars(const char *cs, UChar *us, int32_t length) {
+    UChar u;
+    uint8_t c;
+
+    /*
+     * Allow the entire ASCII repertoire to be mapped _to_ Unicode.
+     * For EBCDIC systems, this works for characters with codes from
+     * codepages 37 and 1047 or compatible.
+     */
+    while(length>0) {
+        c=(uint8_t)(*cs++);
+        u=(UChar)CHAR_TO_UCHAR(c);
+        //U_ASSERT((u!=0 || c==0)); /* only invariant chars converted? */
+        *us++=u;
+        --length;
+    }
+}
+
+void SetDefaultTimeZone(const char* tzid) 
+{
+  size_t tzidlen = strlen(tzid) + 1;
+  UErrorCode status = U_ZERO_ERROR;
+  MaybeStackBuffer<UChar, 256> id(tzidlen);
+  u_charsToUChars(tzid, id.out(), tzidlen);
+  // This is threadsafe:
+  ucal_setDefaultTimeZone(id.out(), &status);
+  //CHECK(U_SUCCESS(status));
+}
+
+void DateTimeConfigurationChangeNotification(
+    Isolate* isolate,
+    const char* val = nullptr) {
+#ifdef V8_OS_POSIX
+    tzset();
+    isolate->DateTimeConfigurationChangeNotification(
+        Isolate::TimeZoneDetection::kRedetect);
+#else
+    _tzset();
+
+# if defined(NODE_HAVE_I18N_SUPPORT)
+    isolate->DateTimeConfigurationChangeNotification(
+        Isolate::TimeZoneDetection::kSkip);
+
+    // On windows, the TZ environment is not supported out of the box.
+    // By default, v8 will only be able to detect the system configured
+    // timezone. This supports using the TZ environment variable to set
+    // the default timezone instead.
+    SetDefaultTimeZone(val);
+# else
+    isolate->DateTimeConfigurationChangeNotification(
+        Isolate::TimeZoneDetection::kRedetect);
+# endif
+#endif
+}
+
 
 constexpr int KB = 1024;
 constexpr int MB = KB * 1024;
@@ -124,6 +195,7 @@ V8EngineProxy::V8EngineProxy(bool enableDebugging, DebugMessageDispatcher* debug
 	_ManagedV8GarbageCollectionRequestCallback = nullptr;
 
 	_Isolate->SetData(0, this); // (sets a reference in the isolate to the proxy [useful within callbacks])
+	
 	//Heap* heap = _Isolate->heap();
 	auto nearHeapLimitCallback = [](void* heap, size_t current_heap_limit, size_t initial_heap_limit) -> size_t
 	{
@@ -145,6 +217,9 @@ V8EngineProxy::V8EngineProxy(bool enableDebugging, DebugMessageDispatcher* debug
 		_DisposedEngines.clear(); // (need to clear the pre-allocated vector on first use)
 	_DisposedEngines.push_back(false);
 	_EngineID = _NextEngineID++;
+
+	setenv("TZ", "UTC", 1);
+	DateTimeConfigurationChangeNotification(_Isolate, "UTC");
 
 	END_ISOLATE_SCOPE;
 }
