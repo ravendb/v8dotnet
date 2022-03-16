@@ -78,6 +78,8 @@ namespace V8.Net
 
         ObjectTemplate _GlobalObjectTemplateProxy;
 
+        internal Context _Context;
+
         internal NativeContext* _NativeContext;
 
         public InternalHandle GlobalObject { get { return _GlobalObject; } }
@@ -258,6 +260,7 @@ namespace V8.Net
                 if (autoCreateGlobalContext)
                 {
                     _NativeContext = V8NetProxy.CreateContext(_NativeV8EngineProxy, _GlobalObjectTemplateProxy._NativeObjectTemplateProxy);
+                    _Context = new Context(_NativeContext);
                     _GlobalObject = new InternalHandle(V8NetProxy.SetContext(_NativeV8EngineProxy, _NativeContext), true); // (returns the global object handle)
                 }
             }
@@ -405,12 +408,13 @@ namespace V8.Net
         /// </summary>
         public void ForceV8GarbageCollection()
         {
-#if DEBUG            
-            do {
-                ManagedSideHasDisposedHandles = false;
-                V8NetProxy.ForceGC(_NativeV8EngineProxy);
-            } while (ManagedSideHasDisposedHandles);
-#endif
+            if (IsMemoryChecksOn)
+            {
+                do {
+                    ManagedSideHasDisposedHandles = false;
+                    V8NetProxy.ForceGC(_NativeV8EngineProxy);
+                } while (ManagedSideHasDisposedHandles);
+            }
         }
 
         public void ForceV8GarbageCollectionIfDisposed()
@@ -418,6 +422,18 @@ namespace V8.Net
             if (ManagedSideHasDisposedHandles) {
                 ForceV8GarbageCollection();
             }
+        }
+
+        public void AddToMemorySnapshots(InternalHandle h)
+        {
+            if (IsMemoryChecksOn)
+            {
+                foreach(var snapshot in MemorySnapshots.Values)
+                {
+                    snapshot.Add(h);
+                }
+            }
+
         }
 
         /// <summary>
@@ -732,6 +748,7 @@ namespace V8.Net
         public InternalHandle SetContext(Context context)
         {
             var hglobal = V8NetProxy.SetContext(_NativeV8EngineProxy, context); // (returns the global object handle)
+            _Context = context;
             _NativeContext = context;
             _GlobalObject.KeepTrack(); // (not sure if the user will keep track of the internal handle, so we will let the GC track it just in case)
             _GlobalObject = hglobal; // (just replace it)
@@ -1026,23 +1043,33 @@ namespace V8.Net
                 jsRes = CreateValue(((StringBuilder)value).ToString());
             else if (value is DateTime)
                 jsRes = CreateValue((DateTime)value);
-            else if (value is TimeSpan)
-                jsRes = CreateValue((TimeSpan)value);
             else if (value is Enum) // (enums are simply integer like values)
                 jsRes = CreateValue((int)value);
             else if (value is Array)
                 jsRes = CreateValue((IEnumerable)value);
-            else //??if (value.GetType().IsClass)
-                jsRes = CreateBinding(value, null, recursive, memberSecurity);
+            else
+            {
+                jsRes = FromObject(value, createBinder: false);
+                if (jsRes.IsEmpty)
+                {
+                    if (value is TimeSpan)
+                        jsRes = CreateValue((TimeSpan)value);
+                    else //??if (value.GetType().IsClass)
+                        jsRes = CreateBinding(value, null, recursive, memberSecurity);
+                }
+            }
 
             if (jsRes.IsEmpty) {
                 throw new NotSupportedException($"Cannot convert object of type '{value.GetType().Name}' to a JavaScript value.");
             }
 
-#if DEBUG
-            if (jsRes.RefCount != 1)
-                throw new InvalidOperationException($"Create value wrong ref count (not 1): {jsRes.RefCount}");
-#endif
+            if (IsMemoryChecksOn)
+            {
+                int expectedRefCount = 1 + (jsRes.IsRooted ? 1 : 0);
+                if (jsRes.RefCount != expectedRefCount)
+                    throw new InvalidOperationException($"Create value wrong ref count (not {expectedRefCount}): {jsRes.RefCount}");
+            }
+            
             return jsRes;
         }
 
@@ -1078,71 +1105,37 @@ namespace V8.Net
 
         // --------------------------------------------------------------------------------------------------------------------
 
-#if DEBUG
-        public Dictionary<string, MemorySnapshot> MemorySnapshots;
+        public MemorySnapshot LastMemorySnapshotBefore
+        {
 
-        public class MemorySnapshot {
-            public List<Int32> ExistingHandleIDs;
-            public List<Int32> ExistingObjectIDs;
-
-            public Dictionary<Int32, int> ChildHandleIDs;
-
-            public MemorySnapshot(V8Engine engine)
+            get => _Context.LastMemorySnapshotBefore;
+            set
             {
-                Init(engine);
-            }
-
-            public void Reset()
-            {
-                if (ExistingHandleIDs == null)
-                    ExistingHandleIDs = new List<Int32>();
-                else
-                    ExistingHandleIDs.Clear();
-
-                if (ExistingObjectIDs == null)
-                    ExistingObjectIDs = new List<Int32>();
-                else
-                    ExistingObjectIDs.Clear();
-
-                if (ChildHandleIDs == null)
-                    ChildHandleIDs = new Dictionary<Int32, int>();
-                else
-                    ChildHandleIDs.Clear();
-            }
-
-            public void Init(V8Engine engine) 
-            {
-                Reset();
-
-                for (var i = 0; i < engine._HandleProxies.Length; i++)
-                {
-                    var hProxy = engine._HandleProxies[i];
-                    if (hProxy != null && !hProxy->IsCLRDisposed)
-                    {
-                        ExistingHandleIDs.Add(i);
-                    }
-                }
-
-                for (var i = 0; i < engine._Objects.Count; i++)
-                {
-                    var rootableRef = engine._Objects[i]; 
-                    if (rootableRef != null) {
-                        InternalHandle h = ((V8NativeObject)rootableRef.Target)?._ ?? InternalHandle.Empty;
-                        if (!h.IsEmpty) {
-                            ExistingObjectIDs.Add(i);
-                        }
-                    }
-                }
+                _Context.LastMemorySnapshotBefore = value;
             }
         }
 
-        public void MakeSnapshot(string name)
+        public Dictionary<string, MemorySnapshot> MemorySnapshots
         {
-            //return;
-        
-            if (MemorySnapshots == null)
-                MemorySnapshots = new Dictionary<string, MemorySnapshot>();
 
+            get => _Context.MemorySnapshots;
+            set
+            {
+                _Context.MemorySnapshots = value;
+            }
+        }
+
+        public void AddToLastMemorySnapshotBefore(InternalHandle h)
+        {
+            if (IsMemoryChecksOn)
+                LastMemorySnapshotBefore?.Add(h);
+        }
+
+        public MemorySnapshot MakeMemorySnapshot(string name)
+        {
+            if (!IsMemoryChecksOn)
+                return null;
+        
             MemorySnapshot snapshotBefore = null;
             if (MemorySnapshots?.TryGetValue(name, out snapshotBefore) == true &&
                 snapshotBefore != null)
@@ -1153,29 +1146,39 @@ namespace V8.Net
                 snapshotBefore = new MemorySnapshot(this);
                 MemorySnapshots[name] = snapshotBefore;
             }
+            LastMemorySnapshotBefore = snapshotBefore;
+            return snapshotBefore;
         }
 
-        public void CheckForMemoryLeaks(string name)
+        public bool RemoveMemorySnapshot(string name)
         {
-            //return;
-        
+            return MemorySnapshots.Remove(name);
+        }
+
+        public void CheckForMemoryLeaks(string name, bool shouldRemove = true)
+        {
+            if (!IsMemoryChecksOn)
+                return;
+                
             if (MemorySnapshots == null)
                 MemorySnapshots = new Dictionary<string, MemorySnapshot>();
                 
             MemorySnapshot snapshotBefore = null;
-            if (!(MemorySnapshots?.TryGetValue(name, out snapshotBefore) == true &&
+            if (!(MemorySnapshots.TryGetValue(name, out snapshotBefore) == true &&
                 snapshotBefore != null))
             {
                 throw new InvalidOperationException($"CheckForMemoryLeaks: No snapshotBefore named {name} exists");
             }
+
+            if (shouldRemove)
+                RemoveMemorySnapshot(name);
 
             string leakagesDescHandles = "";
             string leakagesDescObjects = "";
             string leakagesDescSubobjects = "";
             using (var jsStringify = this.Execute("JSON.stringify", "JSON.stringify", true, 0))
             {
-                snapshotBefore.ExistingHandleIDs.Add(jsStringify.HandleID);
-                snapshotBefore.ExistingObjectIDs.Add(jsStringify.ObjectID);
+                snapshotBefore.Add(jsStringify);
 
                 var snapshotAfter = new MemorySnapshot(this);
                 
@@ -1326,17 +1329,6 @@ namespace V8.Net
             leakagesDesc += "\n";
             return leakagesDesc;
         }
-#else
-        public void MakeSnapshot(string name)
-        {
-            return;
-        }
-        
-        public void CheckForMemoryLeaks(string name)
-        {
-            return;
-        }
-#endif
 
     }
 
