@@ -133,7 +133,7 @@ namespace V8.Net
                 int minRefCount = 1 + (jsRes.IsRooted ? 1 : 0);
                 if (jsRes.RefCount >= minRefCount)
                 {
-                    jsRes.Dec(); // TODO [shlomo] to switch on
+                    jsRes.Dec(); // [shlomo]
                     return jsRes;
                 }
                 else
