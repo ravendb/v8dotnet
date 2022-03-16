@@ -89,7 +89,6 @@ using namespace v8;
     #pragma warning Unknown dynamic link import/export semantics.
 #endif
 
-
 // ========================================================================================================================
 
 // 
@@ -572,7 +571,8 @@ typedef HandleProxy* (STDCALL *ManagedAccessorSetter)(HandleProxy *_this, uint16
 // A managed call-back that is triggered when a native object has no more references.
 // When the managed side is notified of no more JavaScript/V8 references, then the associated strong-reference on the managed side is cleared to allow the
 // managed weak reference to track the managed object.  Persisted object handles will be disposed when the managed objects are finalized.
-typedef bool (STDCALL *ManagedV8GarbageCollectionRequestCallback)(ContextProxy* nativeContext, HandleProxy *hProxy);
+typedef bool (STDCALL *ManagedV8GarbageCollectionRequestCallback)(HandleProxy *hProxy);
+//typedef bool (STDCALL *ManagedV8GarbageCollectionRequestCallback)(ContextProxy* nativeContext, HandleProxy *hProxy); // TODO [shlomo] for moving _Objects to context
 
 // ------------------------------------------------------------------------------------------------------------------------
 
