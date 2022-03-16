@@ -350,6 +350,7 @@ void HandleProxy::_RevivableCallback(const WeakCallbackInfo<HandleProxy>& data)
 
 	engineProxy->_InCallbackScope++;
 	auto canDisposeNow = handleProxy->IsDisposeReadyManagedSide() || engineProxy->_ManagedV8GarbageCollectionRequestCallback != nullptr && engineProxy->_ManagedV8GarbageCollectionRequestCallback(handleProxy);
+	//auto canDisposeNow = handleProxy->IsDisposeReadyManagedSide() || engineProxy->_ManagedV8GarbageCollectionRequestCallback != nullptr && engineProxy->_ManagedV8GarbageCollectionRequestCallback(engineProxy->GetContext(), handleProxy);  // TODO [shlomo] for moving _Objects to context
 	engineProxy->_InCallbackScope--;
 
 	if (canDisposeNow) // (if the managed side is ok with it, we will clear and dispose this handle now)
