@@ -250,7 +250,11 @@ namespace V8.Net
             // (note: this is a special case, because the function object auto generates the prototype object natively using an existing object template)
 
             using (InternalHandle funcProto = V8NetProxy.GetObjectPrototype(func._Handle))
+            {
                 func._Prototype.Set(funcProto);
+
+                Engine.AddToMemorySnapshots(funcProto);
+            }
 
             lock (_FunctionsByType)
             {
