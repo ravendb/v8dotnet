@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading;
 using System.Runtime.CompilerServices;
 using System.Diagnostics;
+using System.Threading.Tasks;
 
 #if !(V1_1 || V2 || V3 || V3_5)
 using System.Dynamic;
@@ -1638,10 +1639,13 @@ namespace V8.Net
             TypeFunction._BindingMode = BindingMode.Static;
             TypeFunction.TypeBinder = this;
 
+
+            Engine.AddToMemorySnapshots(TypeFunction._);
+
             // TODO: Consolidate the below with the template version above (see '_ApplyBindingToTemplate()').
 
             foreach (var details in _FieldDetails(BindingMode.Static))
-                if (_GetBindingForDataMember(details, out var getter, out var setter) && details.MemberSecurity >= 0)
+                if (details.MemberSecurity >= 0 && _GetBindingForDataMember(details, out var getter, out var setter))
                 {
                     details.Getter = getter;
                     details.Setter = setter;
@@ -1649,7 +1653,7 @@ namespace V8.Net
                 }
 
             foreach (var details in _PropertyDetails(BindingMode.Static))
-                if (_GetBindingForDataMember(details, out var getter, out var setter) && details.MemberSecurity >= 0)
+                if (details.MemberSecurity >= 0 && _GetBindingForDataMember(details, out var getter, out var setter))
                 {
                     details.Getter = getter;
                     details.Setter = setter;
@@ -1657,9 +1661,10 @@ namespace V8.Net
                 }
 
             foreach (var details in _MethodDetails(BindingMode.Static))
-                if (_GetBindingForMethod(details, out var func) && details.MemberSecurity >= 0)
+                if (details.MemberSecurity >= 0 && _GetBindingForMethod(details, out var func))
                 {
                     details.Method = func;
+                    Engine.AddToMemorySnapshots(func._);    
                     _RefreshMemberSecurity(details);
                 }
         }
@@ -1714,7 +1719,7 @@ namespace V8.Net
 
             if (binder.Object != obj)
             {
-                var objType = obj.GetType();
+                var objType = obj is Task ? typeof(Task) : obj.GetType();
                 if (objType != BoundType)
                     throw new InvalidOperationException("'obj' instance of type '" + objType.Name + "' is not compatible with type '" + BoundType.Name + "' as represented by this type binder.");
 
@@ -1869,9 +1874,11 @@ namespace V8.Net
         }
         internal object _Object;
 
+        public bool ShouldDisposeBoundObject = false;
+
         public override void OnDispose()
         {
-            if (Object is IDisposable r) {
+            if (ShouldDisposeBoundObject && Object is IDisposable r) {
                 r.Dispose();
             }
             _Object = null;
@@ -2031,7 +2038,14 @@ namespace V8.Net
                                 memberDetails.Getter = getter;
                                 memberDetails.Setter = setter;
                             }
-                            return getter != null ? (InternalHandle)getter.Invoke(_Handle, propertyName) : InternalHandle.Empty;
+                            
+                            var res = InternalHandle.Empty;
+                            if (getter != null)
+                            {
+                                res = (InternalHandle)getter.Invoke(_Handle, propertyName);
+                                res.Dec(); // [shlomo]  as (InternalHandle) adds extra reference
+                            }
+                            return res;
                         }
                     case MemberTypes.Property:
                         {
@@ -2045,7 +2059,14 @@ namespace V8.Net
                                 memberDetails.Getter = getter;
                                 memberDetails.Setter = setter;
                             }
-                            return getter != null ? (InternalHandle)getter.Invoke(_Handle, propertyName) : InternalHandle.Empty;
+
+                            var res = InternalHandle.Empty;
+                            if (getter != null)
+                            {
+                                res = (InternalHandle)getter.Invoke(_Handle, propertyName);
+                                res.Dec(); // [shlomo] as (InternalHandle) adds extra reference
+                            }
+                            return res;
                         }
                     case MemberTypes.Method:
                         {
@@ -2189,8 +2210,13 @@ namespace V8.Net
         /// <summary>
         /// Holds a list of all binders that can operate on an instance of a given type.
         /// </summary>
-        internal readonly Dictionary<Type, TypeBinder> _Binders = new Dictionary<Type, TypeBinder>();
-        public IEnumerable<TypeBinder> Binders { get { return _Binders.Values; } }
+        
+        internal Dictionary<Type, TypeBinder> _Binders => _Context._Binders;
+
+        public IEnumerable<TypeBinder> Binders => _Binders.Values;
+
+        public Dictionary<Type, Func<TypeBinder>> BindersLazy => _Context._BindersLazy;
+
 
         /// <summary>
         /// Provides an ID for each registered type binder for internal use (to prevent having to re-construct the type object more than once).
@@ -2200,7 +2226,10 @@ namespace V8.Net
         /// <summary>
         /// Returns true if a binding exists for the specified type.
         /// </summary>
-        public bool IsTypeRegistered(Type type) { return _Binders.ContainsKey(type); }
+        public bool IsTypeRegistered(Type type)
+        { 
+            return _Binders.ContainsKey(type) || BindersLazy.ContainsKey(type); 
+        }
 
         /// <summary>
         /// Registers binding related schema for the given type on top an 'ObjectTemplate' instance.  If a type already exists that doesn't match the given parameters, it is replaced.
@@ -2211,10 +2240,19 @@ namespace V8.Net
         /// <param name="className">A custom in-script function name for the specified type, or 'null' to use either the type name as is (the default), or any existing 'ScriptObject' attribute name.</param>
         /// <param name="recursive">When an object is bound, only the object instance itself is bound (and not any reference members). If true, then nested object references are included.</param>
         /// <param name="memberSecurity">Default member attributes for members that don't have the 'ScriptMember' attribute.</param>
-        public TypeBinder RegisterType(Type type, string className = null, bool? recursive = null, ScriptMemberSecurity? memberSecurity = null)
+        public TypeBinder RegisterType(Type type, string className = null, bool? recursive = null, ScriptMemberSecurity? memberSecurity = null, bool useLazy = true)
         {
             TypeBinder binder = null;
-            lock (_Binders) { _Binders.TryGetValue(type, out binder); }
+            lock (_Binders)
+            { 
+                _Binders.TryGetValue(type, out binder);
+                if (binder == null && useLazy && BindersLazy.TryGetValue(type, out Func<TypeBinder> binderInit))
+                {
+                    binderInit();
+                    _Binders.TryGetValue(type, out binder); 
+                }
+            }
+
             if (binder != null && (className == null || className == binder.ClassName)) // (note: if the class name changes, we have no choice but to create a new type binder with new templates)
             {
                 if (recursive != null)
@@ -2238,8 +2276,8 @@ namespace V8.Net
         /// <param name="className">A custom in-script function name for the specified type, or 'null' to use either the type name as is (the default), or any existing 'ScriptObject' attribute name.</param>
         /// <param name="recursive">When an object is bound, only the object instance itself is bound (and not any reference members). If true, then nested object references are included.</param>
         /// <param name="memberSecurity">Default member attributes for members that don't have the 'ScriptMember' attribute.</param>
-        public TypeBinder RegisterType<T>(string className = null, bool? recursive = null, ScriptMemberSecurity? memberSecurity = null)
-        { return RegisterType(typeof(T), className, recursive, memberSecurity); }
+        public TypeBinder RegisterType<T>(string className = null, bool? recursive = null, ScriptMemberSecurity? memberSecurity = null, bool useLazy = true)
+        { return RegisterType(typeof(T), className, recursive, memberSecurity, useLazy); }
 
         /// <summary>
         /// Returns the TypeBinder for the given type.  If nothing is found, 'null' will be returned.
@@ -2248,7 +2286,15 @@ namespace V8.Net
         public TypeBinder GetTypeBinder(Type type)
         {
             TypeBinder binder = null;
-            lock (_Binders) { _Binders.TryGetValue(type, out binder); }
+            lock (_Binders)
+            {
+                _Binders.TryGetValue(type, out binder); 
+                if (binder == null && BindersLazy.TryGetValue(type, out Func<TypeBinder> binderInit))
+                {
+                    binderInit();
+                    _Binders.TryGetValue(type, out binder); 
+                }
+            }
             return binder;
         }
 
@@ -2266,7 +2312,7 @@ namespace V8.Net
         public InternalHandle CreateBinding(Type type, string className = null, bool? recursive = null, ScriptMemberSecurity? memberSecurity = null)
         {
             var typeBinder = RegisterType(type, className, recursive, memberSecurity);
-            return typeBinder.TypeFunction;
+            return typeBinder.TypeFunction._;
         }
 
         /// <summary>
@@ -2309,7 +2355,7 @@ namespace V8.Net
         /// <returns> The new binding. </returns>
         public InternalHandle CreateBinding(object obj, string className = null, bool? recursive = null, ScriptMemberSecurity? memberSecurity = null, bool initializeBinder = true)
         {
-            var objType = obj?.GetType();
+            var objType = obj is Task ? typeof(Task) : obj?.GetType();
 
             if ((objType == null || obj is IHandleBased) && !(obj is ObjectBinder))
                 return CreateValue(obj, recursive, memberSecurity);
