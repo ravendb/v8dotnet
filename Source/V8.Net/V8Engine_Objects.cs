@@ -70,12 +70,19 @@ namespace V8.Net
 
         public void Reset(Handle target = null)
         {
-#if DEBUG
-            if (IsLocked) {
-                InternalHandle h = (Target as Handle)._;
-                throw new InvalidOperationException($"Can't reinitialize CountedReference: RefCount={_RefCount}, Target.HandleID={h.HandleID}, Target.ValueType={h.ValueType}.");
+//#if DEBUG
+            var hTarget = Target as Handle;
+            if (hTarget != null)
+            {
+                InternalHandle h = hTarget._;
+                if (h.IsMemoryChecksOn)
+                {
+                    if (IsLocked) {
+                        throw new InvalidOperationException($"Can't reinitialize CountedReference: RefCount={_RefCount}, Target.HandleID={h.HandleID}, Target.ValueType={h.ValueType}.");
+                    }
+                }
             }
-#endif
+//#endif
 
             if (target == null && Target != null) {
                 GC.SuppressFinalize(Target);
@@ -113,12 +120,18 @@ namespace V8.Net
 
         public void Inc()
         {
-#if DEBUG
-            if (IsRefCountPresent && _RefCount < 0) {
-                InternalHandle h = (Target as Handle)._;
-                throw new InvalidOperationException($"Can't Inc CountedReference: RefCount={_RefCount}, Target.HandleID={h.HandleID}, Target.ValueType={h.ValueType}.");
+            var hTarget = Target as Handle;
+            if (hTarget != null)
+            {
+                InternalHandle h = hTarget._;
+                if (h.IsMemoryChecksOn)
+                {
+                    if (IsRefCountPresent && _RefCount < 0) {
+                        throw new InvalidOperationException($"Can't Inc CountedReference: RefCount={_RefCount}, Target.HandleID={h.HandleID}, Target.ValueType={h.ValueType}.");
+                    }
+                }
             }
-#endif
+
             if (_RefCount >= 0) {
                 _RefCount += 1;
             }
@@ -126,12 +139,18 @@ namespace V8.Net
 
         public void Dec()
         {
-#if DEBUG
-            if (IsRefCountPresent && _RefCount <= 0) {
-                InternalHandle h = (Target as Handle)._;
-                throw new InvalidOperationException($"Can't Dec CountedReference: RefCount={_RefCount}, Target.HandleID={h.HandleID}, Target.ValueType={h.ValueType}.");
+            var hTarget = Target as Handle;
+            if (hTarget != null)
+            {
+                InternalHandle h = hTarget._;
+                if (h.IsMemoryChecksOn)
+                {
+                    if (IsRefCountPresent && _RefCount <= 0) {
+                        throw new InvalidOperationException($"Can't Dec CountedReference: RefCount={_RefCount}, Target.HandleID={h.HandleID}, Target.ValueType={h.ValueType}.");
+                    }
+                }
             }
-#endif
+
             if (_RefCount > 0) {
                 _RefCount -= 1;
             }
@@ -165,6 +184,8 @@ namespace V8.Net
         /// </summary>
         internal readonly IndexedObjectList<RootableReference> _Objects = new IndexedObjectList<RootableReference>();
         internal readonly ReaderWriterLock _ObjectsLocker = new ReaderWriterLock();
+        //internal IndexedObjectList<RootableReference> _Objects => _Context?._Objects;
+        //internal ReaderWriterLock _ObjectsLocker => _Context?._ObjectsLocker;
 
         // --------------------------------------------------------------------------------------------------------------------
 
@@ -201,13 +222,13 @@ namespace V8.Net
 
             if (_UnrootObject(objectID)) { 
                 using (_ObjectsLocker.WriteLock()) { 
-    #if DEBUG
+    //#if DEBUG
                     // RootedHandle is to be empty here
                     var rootableRef = _Objects[objectID]; 
                     if (rootableRef != null && !rootableRef.RootedHandle.IsEmpty) {
                         throw new InvalidOperationException($"Attempt to remove rooted object: some Inc have been missed or extra Dec has been peformed: objectID={objectID}");
                     }
-    #endif
+    //#endif
                     _Objects.Remove(objectID);
                 }
             } 
@@ -240,6 +261,11 @@ namespace V8.Net
             }
             return true; 
         }
+
+        /*internal bool _UnrootObject(NativeContext* nativeContext, HandleProxy* handleProxy)
+        {
+
+        }*/
 
         internal bool _UnrootObject(int objectID) // (looks up the object and attempts to make it unrooted)
         {
