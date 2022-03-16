@@ -267,10 +267,12 @@ namespace V8.Net
                     if (IsBinder) {
                         descObject += $", BoundObjectType={BoundObject?.GetType()}";
                     }
-#if DEBUG
-                    if (Object is IV8DebugInfo info)
-                        descObject += info.Summary;
-#endif
+
+                    if (IsMemoryChecksOn)
+                    {
+                        if (Object is IV8DebugInfo info)
+                            descObject += info.Summary;
+                    }
                 }
                 return _HandleProxy != null ? _HandleProxy->Summary + $", refCount={RefCount}, isRooted={IsRooted}{descObject}" : null;
             }
@@ -595,6 +597,8 @@ namespace V8.Net
         }
 
         // --------------------------------------------------------------------------------------------------------------------
+        public bool IsMemoryChecksOn => Engine?.IsMemoryChecksOn ?? false;
+
         public CountedReference CountedRef {
             get {
                 var cref = Engine?.GetCountedReference(HandleID);
@@ -739,8 +743,14 @@ namespace V8.Net
                 ForceDispose(false, false);
                 return true;
             }
-            else if (!ignoreErrors)
-                throw new InvalidOperationException("The handle is locked and cannot be disposed. Locked handles are either the global object, or belong to 'V8NativeObject' objects, which are responsible for disposing them under controlled conditions.");
+            else 
+            {
+                if (IsMemoryChecksOn && cref.RefCount <= 0)
+                    throw new InvalidOperationException($"The handle is locked while it reference count is zero: {Summary}");
+
+                if (!ignoreErrors)
+                    throw new InvalidOperationException($"The handle is locked and cannot be disposed. Locked handles are either the global object, or belong to 'V8NativeObject' objects, which are responsible for disposing them under controlled conditions: {Summary}");
+            }
 
             _HandleProxy = null;
             _Object = null;
@@ -849,7 +859,7 @@ namespace V8.Net
 
         public static implicit operator double(InternalHandle handle)
         {
-            return (double)Types.ChangeType(handle.Value, typeof(double));
+            return (double)Types.ChangeType(handle.ValueRaw, typeof(double));
         }
 
         public static implicit operator string(InternalHandle handle)
@@ -859,9 +869,11 @@ namespace V8.Net
 
         public static implicit operator DateTime(InternalHandle handle)
         {
-            object value = handle.Value;
+            return (DateTime)handle.Value;
+            /*object value = handle.Value;
             var ms = (double)Types.ChangeType(value, typeof(double));
-            return new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddMilliseconds(ms);
+            var ms = (double)Types.ChangeType(value, typeof(double));
+            return new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddMilliseconds(ms);*/
             //return new DateTime(1970, 1, 1) + TimeSpan.FromMilliseconds(ms);
         }
 
@@ -1018,6 +1030,28 @@ namespace V8.Net
 
                     V8NetProxy.UpdateHandleValue(_HandleProxy);
                     return _HandleProxy->Value;
+                }
+                else return null;
+            }
+        }
+
+        public object ValueRaw
+        {
+            get
+            {
+                if (_HandleProxy != null)
+                {
+                    if (IsBinder)
+                        return BoundObject;
+
+                    if (CLRTypeID >= 0)
+                    {
+                        var argInfo = new ArgInfo(Engine, this);
+                        return argInfo.ValueOrDefault; // (this object represents a ArgInfo object, so return its value)
+                    }
+
+                    V8NetProxy.UpdateHandleValue(_HandleProxy);
+                    return _HandleProxy->ValueRaw;
                 }
                 else return null;
             }
@@ -1596,14 +1630,17 @@ namespace V8.Net
         /// in-script traversal of the object reference tree (so make sure this doesn't expose sensitive methods/properties/fields).</param>
         /// <param name="memberSecurity">For object instances, these are default flags that describe JavaScript properties for all object instance members that
         /// don't have any 'ScriptMember' attribute.  The flags should be 'OR'd together as needed.</param>
-        public bool SetProperty(Type type, V8PropertyAttributes propertyAttributes = V8PropertyAttributes.None, string className = null, bool? recursive = null, ScriptMemberSecurity? memberSecurity = null)
+        public bool SetProperty(Type type, V8PropertyAttributes propertyAttributes = V8PropertyAttributes.None, string className = null, bool? recursive = null, ScriptMemberSecurity? memberSecurity = null, bool addToLastMemorySnapshotBefore = false)
         {
             if (!IsObjectType)
                 throw new InvalidOperationException(_NOT_AN_OBJECT_ERRORMSG);
 
-            var func = (V8Function)Engine.CreateBinding(type, className, recursive, memberSecurity).Object;
+            var func = Engine.CreateBinding(type, className, recursive, memberSecurity);
 
-            return SetProperty(func.FunctionTemplate.ClassName, func, propertyAttributes);
+            if (addToLastMemorySnapshotBefore && Engine.IsMemoryChecksOn)
+                Engine.AddToLastMemorySnapshotBefore(func);
+
+            return SetProperty(((V8Function)func.Object).FunctionTemplate.ClassName, func, propertyAttributes);
         }
 
         // --------------------------------------------------------------------------------------------------------------------
