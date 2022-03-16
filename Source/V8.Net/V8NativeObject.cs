@@ -61,9 +61,9 @@ namespace V8.Net
     /// <para>This class implements 'DynamicObject' to make setting properties a bit easier.</para>
     /// </summary>
     public unsafe class V8NativeObject : Handle, IV8NativeObject, IV8Object, IDynamicMetaObjectProvider
-#if DEBUG
+//#if DEBUG
     , IV8DebugInfo
-#endif
+//#endif
     {
         // --------------------------------------------------------------------------------------------------------------------
 
@@ -80,7 +80,7 @@ namespace V8.Net
             IsLocked = false;
         }
 
-#if DEBUG
+//#if DEBUG
         public V8EntityID SelfID
         {
             get {
@@ -110,7 +110,7 @@ namespace V8.Net
         {
             get {return "";}
         }
-#endif
+//#endif
 
         new public V8NativeObject Object { get { return this; } }
 
@@ -501,9 +501,9 @@ namespace V8.Net
         /// in-script traversal of the object reference tree (so make sure this doesn't expose sensitive methods/properties/fields).</param>
         /// <param name="memberSecurity">For object instances, these are default flags that describe JavaScript properties for all object instance members that
         /// don't have any 'ScriptMember' attribute.  The flags should be 'OR'd together as needed.</param>
-        public virtual bool SetProperty(Type type, V8PropertyAttributes propertyAttributes = V8PropertyAttributes.None, string className = null, bool? recursive = null, ScriptMemberSecurity? memberSecurity = null)
+        public virtual bool SetProperty(Type type, V8PropertyAttributes propertyAttributes = V8PropertyAttributes.None, string className = null, bool? recursive = null, ScriptMemberSecurity? memberSecurity = null, bool addToLastMemorySnapshotBefore = false)
         {
-            return _Handle.SetProperty(type, propertyAttributes, className, recursive, memberSecurity);
+            return _Handle.SetProperty(type, propertyAttributes, className, recursive, memberSecurity, addToLastMemorySnapshotBefore);
         }
 
         // --------------------------------------------------------------------------------------------------------------------
