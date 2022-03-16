@@ -11,6 +11,7 @@ namespace V8.Net
     {
         InternalHandle ConvertToJs(V8Engine engine, object obj, bool keepAlive = false);
 
+        bool IsMemoryChecksOn { get; }
     }
 
     public class DummyJsConverter : IJsConverter
@@ -20,6 +21,7 @@ namespace V8.Net
             return InternalHandle.Empty;
         }
 
+        public bool IsMemoryChecksOn => false;
     }
 
     // ========================================================================================================================
@@ -38,6 +40,8 @@ namespace V8.Net
 
 
         private IJsConverter _jsConverter;
+
+        public bool IsMemoryChecksOn => _jsConverter?.IsMemoryChecksOn ?? false;
 
         protected Dictionary<Type, Func<object, InternalHandle>> TypeMappers;
 
@@ -71,7 +75,7 @@ namespace V8.Net
             }
             if (tb == null)
             {
-                var type = obj.GetType();
+                Type type = obj is Task ? typeof(Task) : obj.GetType();
                 tb = GetTypeBinder(type);
                 if (tb == null)
                     throw new InvalidOperationException($"No TypeBinder found for type {nameof(type)}");
@@ -79,16 +83,17 @@ namespace V8.Net
 
             ObjectBinder binder = tb.CreateObjectBinder<TObjectBinder, object>(obj, true, keepAlive: keepAlive);
 
-#if DEBUG
-            if (obj is IV8DebugInfo di)
-                di.SelfID = new V8EntityID(binder._.ID, binder._.ObjectID);
-#endif
+            if (IsMemoryChecksOn)
+            {
+                if (obj is IV8DebugInfo di)
+                    di.SelfID = new V8EntityID(binder._.ID, binder._.ObjectID);
+            }
 
             return binder._; //new InternalHandle(ref binder._, true);
         }
 
 
-        public InternalHandle FromObject(object obj, bool keepAlive = false)
+        public InternalHandle FromObject(object obj, bool keepAlive = false, bool createBinder = true)
         {
             if (obj == null)
                 return InternalHandle.Empty;
@@ -145,7 +150,7 @@ namespace V8.Net
                 return this.CreateFunctionTemplate().GetFunctionObject<V8Function>(f)._;
 
             // if no known type could be guessed, wrap it as an ObjectBinder
-            return CreateObjectBinder(obj, keepAlive: keepAlive);
+            return createBinder ? CreateObjectBinder(obj, keepAlive: keepAlive) : InternalHandle.Empty;
         }
 
         private InternalHandle Convert(object v)
@@ -185,23 +190,22 @@ namespace V8.Net
             return o.AsDouble;
         }
 
-        private int _maxDuration = 0;
-
         public void SetMaxDuration(int maxDurationNew)
         {
-            _maxDuration = maxDurationNew;
+            _Context.MaxDuration = maxDurationNew;
         }
 
         public IDisposable ChangeMaxDuration(int maxDurationNew)
         {
-            int maxDurationPrev = _maxDuration;
+            var context = _Context;
+            int maxDurationPrev = context.MaxDuration;
 
             void RestoreMaxDuration()
             {
-                _maxDuration = maxDurationPrev;
+                context.MaxDuration = maxDurationPrev;
             }
 
-            _maxDuration = maxDurationNew;
+            context.MaxDuration = maxDurationNew;
             return new DisposableAction(RestoreMaxDuration);
         }
 
@@ -222,9 +226,9 @@ namespace V8.Net
             // there is no need to do something as V8 doesn't have intermediate state of timer
         }
 
-        private int RefineMaxDuration(int timeout)
+        public int RefineMaxDuration(int timeout)
         {
-            return timeout > 0 ? timeout : _maxDuration;
+            return timeout > 0 ? timeout : _Context.MaxDuration;
         }
         
         public void ExecuteWithReset(string source, string sourceName = "anonymousCode.js", bool throwExceptionOnError = true, int timeout = 0)
