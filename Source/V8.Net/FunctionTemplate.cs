@@ -158,43 +158,48 @@ namespace V8.Net
         // TODO: This is shared in both templates - consider putting elsewhere.
         internal static HandleProxy* _CallBack(Int32 managedObjectID, bool isConstructCall, HandleProxy* _this, HandleProxy** args, Int32 argCount, params JSFunction[] functions)
         {
-            // ... get a handle to the native "this" object ...
-
-            InternalHandle hThis = _this;
-
-            V8Engine engine = hThis.Engine;
-
             // ... wrap the arguments ...
-
             InternalHandle[] _args = new InternalHandle[argCount];
             int i;
 
-            for (i = 0; i < argCount; i++)
-                _args[i] = args[i]; // (since these will be disposed immediately after, the "first" flag is not required [this also prevents it from getting passed on])
+            for (i = 0; i < argCount; i++) {
+                HandleProxy* arg = args[i];
+                _args[i] = new InternalHandle(arg, true); // (since these will be disposed immediately after, the "first" flag is not required [this also prevents it from getting passed on])
+            }
 
             // (note: the underlying native handles for '_this' and any arguments will be disposed automatically upon return, unless the user calls 'KeepAlive()' on them)
 
-            InternalHandle result = null;
+            var result = InternalHandle.Empty;
 
-            // ... call all function types (multiple custom derived function types are allowed, but only one of each type) ...
-            foreach (var callback in functions)
+            // ... get a handle to the native "this" object ...
+            using (InternalHandle hThis = _this)
             {
-                result = callback(engine, isConstructCall, hThis, _args);
+                V8Engine engine = hThis.Engine;
 
-                if (!result.IsEmpty) break;
+                // ... call all function types (multiple custom derived function types are allowed, but only one of each type) ...
+                foreach (var callback in functions)
+                {
+                    result = callback(engine, isConstructCall, hThis, _args);
+
+                    if (!result.IsEmpty) break;
+                }
+
+                for (i = 0; i < argCount; i++)
+                    _args[i].Dispose(); // (since these will be disposed immediately after, the "first" flag is not required [this also prevents it from getting passed on])
+
+                var obj = result.Object;
+
+                // ... make sure the user is not returning a 'V8ManagedObject' instance associated with the new object (the property interceptors will never work) ...
+
+                if (isConstructCall && obj != null && obj is V8ManagedObject && obj.InternalHandle == hThis)
+                    throw new InvalidOperationException("You've attempted to return the type '" + obj.GetType().Name
+                        + "' which is of type V8ManagedObject in a construction call (using 'new' in JavaScript) to wrap the new native object given to the constructor.  The native V8 engine"
+                        + " only supports interceptor hooks for objects generated from ObjectTemplate instances.  You will need to first derive/implement from V8NativeObject/IV8NativeObject"
+                        + " for your custom object(s), or rewrite your object to use V8NativeObject directly instead and use the 'SetAccessor()' handle method.");
             }
 
-            var obj = result.Object;
-
-            // ... make sure the user is not returning a 'V8ManagedObject' instance associated with the new object (the property interceptors will never work) ...
-
-            if (isConstructCall && obj != null && obj is V8ManagedObject && obj.InternalHandle == hThis)
-                throw new InvalidOperationException("You've attempted to return the type '" + obj.GetType().Name
-                    + "' which is of type V8ManagedObject in a construction call (using 'new' in JavaScript) to wrap the new native object given to the constructor.  The native V8 engine"
-                    + " only supports interceptor hooks for objects generated from ObjectTemplate instances.  You will need to first derive/implement from V8NativeObject/IV8NativeObject"
-                    + " for your custom object(s), or rewrite your object to use V8NativeObject directly instead and use the 'SetAccessor()' handle method.");
-
-            return result;
+            using (result.KeepAlive())
+                return result;
         }
 
         // --------------------------------------------------------------------------------------------------------------------
@@ -234,18 +239,22 @@ namespace V8.Net
             // ... get the v8 "Function" object ...
 
             InternalHandle hNativeFunc = V8NetProxy.GetFunction(_NativeFunctionTemplateProxy);
-
             // ... create a managed wrapper for the V8 "Function" object (note: functions inherit the native V8 "Object" type) ...
 
             func = _Engine._GetObject<T>(this, hNativeFunc, true, false); // (note: this will "connect" the native object [hNativeFunc] to a new managed V8Function wrapper, and set the prototype!)
-
+            
             if (callback != null)
                 func.Callback = callback;
 
             // ... get the function's prototype object, wrap it, and give it to the new function object ...
             // (note: this is a special case, because the function object auto generates the prototype object natively using an existing object template)
 
-            func._Prototype.Set(V8NetProxy.GetObjectPrototype(func._Handle));
+            using (InternalHandle funcProto = V8NetProxy.GetObjectPrototype(func._Handle))
+            {
+                func._Prototype.Set(funcProto);
+
+                Engine.AddToMemorySnapshots(funcProto);
+            }
 
             lock (_FunctionsByType)
             {
@@ -334,7 +343,7 @@ namespace V8.Net
             catch (Exception ex)
             {
                 // ... something went wrong, so remove the new managed object ...
-                _Engine._RemoveObjectWeakReference(obj.ID);
+                _Engine._RemoveObjectRootableReference(obj.ID);
                 throw ex;
             }
             finally

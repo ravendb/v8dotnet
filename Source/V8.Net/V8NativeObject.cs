@@ -61,6 +61,9 @@ namespace V8.Net
     /// <para>This class implements 'DynamicObject' to make setting properties a bit easier.</para>
     /// </summary>
     public unsafe class V8NativeObject : Handle, IV8NativeObject, IV8Object, IDynamicMetaObjectProvider
+//#if DEBUG
+    , IV8DebugInfo
+//#endif
     {
         // --------------------------------------------------------------------------------------------------------------------
 
@@ -70,6 +73,44 @@ namespace V8.Net
         /// </summary>
         new public V8Engine Engine { get { return _Engine ?? (_Engine = _Handle.Engine); } }
         internal V8Engine _Engine;
+        public bool IsLocked;
+
+        public void SetReadyToDisposal()
+        {
+            IsLocked = false;
+        }
+
+//#if DEBUG
+        public V8EntityID SelfID
+        {
+            get {
+                return new V8EntityID(_Handle.HandleID, _Handle.ObjectID);
+            } 
+
+            set {} 
+        }
+
+        public V8EntityID ParentID
+        {
+            get {return null;} 
+        }
+
+        public List<V8EntityID> ChildIDs
+        {
+            get {
+                var res = new List<V8EntityID>();
+                if (!_Prototype.IsEmpty) {
+                    res.Add(new V8EntityID(_Prototype.HandleID, _Prototype.ObjectID));
+                }
+                return res;
+            } 
+        }
+
+        public string Summary
+        {
+            get {return "";}
+        }
+//#endif
 
         new public V8NativeObject Object { get { return this; } }
 
@@ -243,6 +284,7 @@ namespace V8.Net
             _CreationStack = Environment.StackTrace;
 #endif
             _Proxy = this;
+            IsLocked = true;
         }
 
         public V8NativeObject(IV8NativeObject proxy)
@@ -289,7 +331,7 @@ namespace V8.Net
 
         public override void Dispose()
         {
-            _Dispose();
+            DisposeObject(false);
         }
 
         /// <summary>
@@ -311,7 +353,7 @@ namespace V8.Net
         /// <summary>
         ///     Returns true if disposed, and false if already disposed.
         /// </summary>
-        internal bool _Dispose() // WARNING: The worker thread may cause a V8 GC callback in its own thread!
+        public bool DisposeObject(bool fromInternalHandle = false) // WARNING: The worker thread may cause a V8 GC callback in its own thread!
         {
             if (!_Handle.IsEmpty)
             {
@@ -352,21 +394,26 @@ namespace V8.Net
                 Setter = null;
                 _Setter = null;
 
+                _Prototype.Dispose();
                 // ... reset and dispose the handle ...
 
-                if (!_Handle.IsEmpty)
-                {
-                    _Handle.ObjectID = -1; // (resets the object ID on the native side [though this happens anyhow once cached], which also causes the reference to clear)
-                    // (MUST clear the object ID, else the handle will not get disposed [because '{Handle}.IsLocked' will return false])
-                    _Handle._Finalize(false);
+                //_Handle.ObjectID = -1; // (resets the object ID on the native side [though this happens anyhow once cached], which also causes the reference to clear)
+                // (MUST clear the object ID, else the handle will not get disposed [because '{Handle}.IsLocked' will return false])
+                if (!fromInternalHandle) {
+                    InternalHandle h = _Handle;
+                    _Handle = InternalHandle.Empty;
+                    h.ForceDispose(false, true);
                 }
 
-                if (_ID != null)
-                    engine._RemoveObjectWeakReference(_ID.Value);
+                var objectID = _ID != null ? _ID.Value : -1;
 
                 Template = null; // (note: this decrements a template counter, allowing the template object to be finally allowed to dispose)
                 _ID = null; // (also allows the GC finalizer to collect the object)
+        
+                if (objectID >= 0)
+                    engine._RemoveObjectRootableReference(objectID);
 
+                GC.SuppressFinalize(this); // added KSI
                 return true;
             }
 
@@ -454,9 +501,9 @@ namespace V8.Net
         /// in-script traversal of the object reference tree (so make sure this doesn't expose sensitive methods/properties/fields).</param>
         /// <param name="memberSecurity">For object instances, these are default flags that describe JavaScript properties for all object instance members that
         /// don't have any 'ScriptMember' attribute.  The flags should be 'OR'd together as needed.</param>
-        public virtual bool SetProperty(Type type, V8PropertyAttributes propertyAttributes = V8PropertyAttributes.None, string className = null, bool? recursive = null, ScriptMemberSecurity? memberSecurity = null)
+        public virtual bool SetProperty(Type type, V8PropertyAttributes propertyAttributes = V8PropertyAttributes.None, string className = null, bool? recursive = null, ScriptMemberSecurity? memberSecurity = null, bool addToLastMemorySnapshotBefore = false)
         {
-            return _Handle.SetProperty(type, propertyAttributes, className, recursive, memberSecurity);
+            return _Handle.SetProperty(type, propertyAttributes, className, recursive, memberSecurity, addToLastMemorySnapshotBefore);
         }
 
         // --------------------------------------------------------------------------------------------------------------------

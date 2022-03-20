@@ -19,9 +19,13 @@ ContextProxy::~ContextProxy()
 
 			// ... need to also release the native proxy object attached to this ...
 
-			auto globalObject = _Context->Global()->GetPrototype()->ToObject(_EngineProxy->Isolate());
-			auto templateProxy = (ObjectTemplateProxy*)globalObject->GetAlignedPointerFromInternalField(0); // (proxy object reference)
-			if (templateProxy != nullptr) delete templateProxy;
+			auto globalObjectML = _Context->Global()->GetPrototype()->ToObject(_EngineProxy->Context());
+			Local<Object> globalObject;
+			if (globalObjectML.ToLocal(&globalObject))
+			{
+				auto templateProxy = (ObjectTemplateProxy*)globalObject->GetAlignedPointerFromInternalField(0); // (proxy object reference)
+				if (templateProxy != nullptr) delete templateProxy;
+			}
 
 			_Context->Exit();
 

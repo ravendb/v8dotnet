@@ -1,9 +1,10 @@
-﻿/* All V8.NET source is governed by the LGPL licensing model. Please keep these comments intact, thanks.
+/* All V8.NET source is governed by the LGPL licensing model. Please keep these comments intact, thanks.
  * Developer: James Wilkins (jameswilkins.net).
  * Source, Documentation, and Support: https://v8dotnet.codeplex.com
  */
 
 using System;
+using System.Runtime.CompilerServices;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -76,6 +77,8 @@ namespace V8.Net
         static readonly object _GlobalLock = new object();
 
         ObjectTemplate _GlobalObjectTemplateProxy;
+
+        internal Context _Context;
 
         internal NativeContext* _NativeContext;
 
@@ -242,7 +245,7 @@ namespace V8.Net
         ///     (Optional) True to automatically create a global context. If this is false then you must construct a context
         ///     yourself before executing JavaScript or calling methods that require contexts.
         /// </param>
-        public V8Engine(bool autoCreateGlobalContext = true)
+        public V8Engine(bool autoCreateGlobalContext = true, IJsConverter jsConverter = null)
         {
             RunMarshallingTests();
 
@@ -257,7 +260,8 @@ namespace V8.Net
                 if (autoCreateGlobalContext)
                 {
                     _NativeContext = V8NetProxy.CreateContext(_NativeV8EngineProxy, _GlobalObjectTemplateProxy._NativeObjectTemplateProxy);
-                    _GlobalObject = V8NetProxy.SetContext(_NativeV8EngineProxy, _NativeContext); // (returns the global object handle)
+                    _Context = new Context(_NativeContext);
+                    _GlobalObject = new InternalHandle(V8NetProxy.SetContext(_NativeV8EngineProxy, _NativeContext), true); // (returns the global object handle)
                 }
             }
 
@@ -267,6 +271,35 @@ namespace V8.Net
             _Initialize_Handles();
             _Initialize_ObjectTemplate();
             //?_Initialize_Worker(); // (DO THIS LAST!!! - the worker expects everything to be ready)
+
+
+            _jsConverter = jsConverter ?? V8Engine._dummyJsConverter;
+
+            TypeMappers = new Dictionary<Type, Func<object, InternalHandle>>()
+            {
+                {typeof(bool), (v) => CreateValue((bool) v)},
+                {typeof(byte), (v) => CreateValue((byte) v)},
+                {typeof(char), (v) => CreateValue((char) v)},
+                {typeof(TimeSpan), (v) => CreateValue((TimeSpan) v)},
+                {typeof(DateTime), (v) => CreateValue((DateTime) v)},
+                //{typeof(DateTimeOffset), (v) => engine.Realm.Intrinsics.Date.Construct((DateTimeOffset) v)},
+                {typeof(decimal), (v) => CreateValue((double) (decimal) v)},
+                {typeof(double), (v) => CreateValue((double) v)},
+                {typeof(SByte), (v) => CreateValue((Int32) (SByte) v)},
+                {typeof(Int16), (v) => CreateValue((Int32) (Int16) v)}, 
+                {typeof(Int32), (v) => CreateValue((Int32) v)},
+                {typeof(Int64), (v) => CreateIntValue((Int64) v)},
+                {typeof(Single), (v) => CreateValue((double) (Single) v)},
+                {typeof(string), (v) => CreateValue((string) v)},
+                {typeof(UInt16), (v) => CreateUIntValue((UInt16) v)}, 
+                {typeof(UInt32), (v) => CreateUIntValue((UInt32) v)},
+                {typeof(UInt64), (v) => CreateUIntValue((UInt64) v)},
+                {
+                    typeof(System.Text.RegularExpressions.Regex),
+                    (v) => CreateValue((System.Text.RegularExpressions.Regex) v)
+                }
+            };
+
         }
 
         ~V8Engine()
@@ -274,13 +307,20 @@ namespace V8.Net
             Dispose();
         }
 
-        public void Dispose()
+        public virtual void Dispose()
         {
             if (_NativeV8EngineProxy != null)
             {
                 //?_TerminateWorker(); // (will return only when it has successfully terminated)
 
                 // ... clear all handles of object IDs for disposal ...
+
+
+                for (var i = 0; i < _TrackerHandles.Length; i++)
+                {
+                    var cref = _TrackerHandles[i];
+                    cref?.Dispose();
+                }
 
                 HandleProxy* hProxy;
 
@@ -298,11 +338,11 @@ namespace V8.Net
 
                 // ... allow all objects to be finalized by the GC ...
 
-                WeakReference weakRef;
+                RootableReference rref;
                 V8NativeObject obj;
 
-                for (var i = 0; i < _Objects.Count; i++)
-                    if ((weakRef = _Objects[i]) != null && (obj = (V8NativeObject)weakRef.Target) != null)
+                for (var i = 0; i < _Objects.Count; i++) {
+                    if ((rref = _Objects[i]) != null && (obj = (V8NativeObject)rref.Target) != null)
                     {
                         obj.OnDispose();
                         obj._ID = null;
@@ -310,6 +350,9 @@ namespace V8.Net
                         obj._Handle = InternalHandle.Empty;
                         GC.SuppressFinalize(obj);
                     }
+                }
+
+                _GlobalObject.Dispose();
 
                 // ... destroy the native engine ...
                 // TODO: Consider caching the engine instead and reuse with a new context.
@@ -327,6 +370,7 @@ namespace V8.Net
         /// Returns true once this engine has been disposed.
         /// </summary>
         public bool IsDisposed { get { return _NativeV8EngineProxy == null; } }
+
 
         // --------------------------------------------------------------------------------------------------------------------
 
@@ -350,6 +394,8 @@ namespace V8.Net
 
         // --------------------------------------------------------------------------------------------------------------------
 
+        public bool ManagedSideHasDisposedHandles = false;
+
         /// <summary>
         ///     Calling this method forces a native call to 'LowMemoryNotification()' and 'IdleNotificationDeadline()' to push the
         ///     V8 engine to complete garbage collection tasks. The work performed helps to reduce the memory footprint within the
@@ -362,7 +408,32 @@ namespace V8.Net
         /// </summary>
         public void ForceV8GarbageCollection()
         {
-            V8NetProxy.ForceGC(_NativeV8EngineProxy);
+            if (IsMemoryChecksOn)
+            {
+                do {
+                    ManagedSideHasDisposedHandles = false;
+                    V8NetProxy.ForceGC(_NativeV8EngineProxy);
+                } while (ManagedSideHasDisposedHandles);
+            }
+        }
+
+        public void ForceV8GarbageCollectionIfDisposed()
+        {
+            if (ManagedSideHasDisposedHandles) {
+                ForceV8GarbageCollection();
+            }
+        }
+
+        public void AddToMemorySnapshots(InternalHandle h)
+        {
+            if (IsMemoryChecksOn)
+            {
+                foreach(var snapshot in MemorySnapshots.Values)
+                {
+                    snapshot.Add(h);
+                }
+            }
+
         }
 
         /// <summary>
@@ -386,8 +457,7 @@ namespace V8.Net
         {
             if (handleProxy->_ObjectID >= 0)
             {
-                if (_UnrootObject(handleProxy->_ObjectID))
-                    return false; // (prevent the V8 GC from disposing the handle; the managed object will now dispose of this handle when the MANAGED GC is ready)
+                return _UnrootObject(handleProxy->_ObjectID); // (prevent the V8 GC from disposing the handle; the managed object will now dispose of this handle when the MANAGED GC is ready)
             }
             return true; // (don't know what this is now, so allow the handle to be disposed)
         }
@@ -411,7 +481,7 @@ namespace V8.Net
         ///     since no tracking is required.
         /// </param>
         /// <returns> An InternalHandle. </returns>
-        public InternalHandle Execute(string script, string sourceName = "V8.NET", bool throwExceptionOnError = false, int timeout = 0, bool trackReturn = true)
+        public InternalHandle Execute(string script, string sourceName = "V8.NET", bool throwExceptionOnError = false, int timeout = 0)
         {
             Timer timer = null;
 
@@ -427,7 +497,7 @@ namespace V8.Net
             if (throwExceptionOnError)
                 result.ThrowOnError();
 
-            return trackReturn ? result.KeepTrack() : result;
+            return result;
         }
 
         /// <summary> Executes JavaScript on the V8 engine and returns the result. </summary>
@@ -459,7 +529,7 @@ namespace V8.Net
             if (throwExceptionOnError)
                 result.ThrowOnError();
 
-            return result.KeepTrack();
+            return result;
         }
 
         /// <summary>
@@ -482,7 +552,7 @@ namespace V8.Net
         {
             InternalHandle result = Execute(script, sourceName, throwExceptionOnError, timeout);
             Console.WriteLine(result.AsString);
-            return result.KeepTrack();
+            return result;
         }
 
         /// <summary>
@@ -507,7 +577,7 @@ namespace V8.Net
             Console.WriteLine(script);
             InternalHandle result = Execute(script, sourceName, throwExceptionOnError, timeout);
             Console.WriteLine(result.AsString);
-            return result.KeepTrack();
+            return result;
         }
 
         /// <summary>
@@ -530,7 +600,7 @@ namespace V8.Net
             if (throwExceptionOnError)
                 result.ThrowOnError();
 
-            return result.KeepTrack();
+            return result;
         }
 
         /// <summary>
@@ -678,6 +748,7 @@ namespace V8.Net
         public InternalHandle SetContext(Context context)
         {
             var hglobal = V8NetProxy.SetContext(_NativeV8EngineProxy, context); // (returns the global object handle)
+            _Context = context;
             _NativeContext = context;
             _GlobalObject.KeepTrack(); // (not sure if the user will keep track of the internal handle, so we will let the GC track it just in case)
             _GlobalObject = hglobal; // (just replace it)
@@ -689,22 +760,22 @@ namespace V8.Net
         /// <summary>
         /// Calls the native V8 proxy library to create the value instance for use within the V8 JavaScript environment.
         /// </summary>
-        public InternalHandle CreateValue(bool b) { return V8NetProxy.CreateBoolean(_NativeV8EngineProxy, b); }
+        public InternalHandle CreateValue(bool b) { return new InternalHandle(V8NetProxy.CreateBoolean(_NativeV8EngineProxy, b), true); }
 
         /// <summary>
         /// Calls the native V8 proxy library to create a 32-bit integer for use within the V8 JavaScript environment.
         /// </summary>
-        public InternalHandle CreateValue(Int32 num) { return V8NetProxy.CreateInteger(_NativeV8EngineProxy, num); }
+        public InternalHandle CreateValue(Int32 num) { return new InternalHandle(V8NetProxy.CreateInteger(_NativeV8EngineProxy, num), true); }
 
         /// <summary>
         /// Calls the native V8 proxy library to create a 64-bit number (double) for use within the V8 JavaScript environment.
         /// </summary>
-        public InternalHandle CreateValue(double num) { return V8NetProxy.CreateNumber(_NativeV8EngineProxy, num); }
+        public InternalHandle CreateValue(double num) { return new InternalHandle(V8NetProxy.CreateNumber(_NativeV8EngineProxy, num), true); }
 
         /// <summary>
         /// Calls the native V8 proxy library to create a string for use within the V8 JavaScript environment.
         /// </summary>
-        public InternalHandle CreateValue(string str) { return V8NetProxy.CreateString(_NativeV8EngineProxy, str); }
+        public InternalHandle CreateValue(string str) { return new InternalHandle(V8NetProxy.CreateString(_NativeV8EngineProxy, str), true); }
 
         /// <summary>
         /// Calls the native V8 proxy library to create an error string for use within the V8 JavaScript environment.
@@ -713,14 +784,14 @@ namespace V8.Net
         public InternalHandle CreateError(string message, JSValueType errorType)
         {
             if (errorType >= 0) throw new InvalidOperationException("Invalid error type.");
-            return V8NetProxy.CreateError(_NativeV8EngineProxy, message, errorType);
+            return new InternalHandle(V8NetProxy.CreateError(_NativeV8EngineProxy, message, errorType), true);
         }
 
         /// <summary>
         /// Calls the native V8 proxy library to create a date for use within the V8 JavaScript environment.
         /// </summary>
         /// <param name="ms">The number of milliseconds since epoch (Jan 1, 1970). This is the same value as 'SomeDate.getTime()' in JavaScript.</param>
-        public InternalHandle CreateValue(TimeSpan ms) { return V8NetProxy.CreateDate(_NativeV8EngineProxy, ms.TotalMilliseconds); }
+        public InternalHandle CreateValue(TimeSpan ms) { return new InternalHandle(V8NetProxy.CreateDate(_NativeV8EngineProxy, ms.TotalMilliseconds), true); }
 
         /// <summary>
         /// Calls the native V8 proxy library to create a date for use within the V8 JavaScript environment.
@@ -789,7 +860,7 @@ namespace V8.Net
             try
             {
                 // ... create a new native object and associated it with the new managed object ID ...
-                obj._Handle.Set(V8NetProxy.CreateObject(_NativeV8EngineProxy, obj.ID));
+                obj._Handle.Set(new InternalHandle(V8NetProxy.CreateObject(_NativeV8EngineProxy, obj.ID), true));
 
                 /* The V8 object will have an associated internal field set to the index of the created managed object above for quick lookup.  This index is used
                  * to locate the associated managed object when a call-back occurs. The lookup is a fast O(1) operation using the custom 'IndexedObjectList' manager.
@@ -798,7 +869,7 @@ namespace V8.Net
             catch (Exception ex)
             {
                 // ... something went wrong, so remove the new managed object ...
-                _RemoveObjectWeakReference(obj.ID);
+                _RemoveObjectRootableReference(obj.ID);
                 throw ex;
             }
 
@@ -814,7 +885,7 @@ namespace V8.Net
         public InternalHandle CreateObject()
         {
             //x if (objectID > -2) throw new InvalidOperationException("Object IDs must be <= -2.");
-            return (Handle)V8NetProxy.CreateObject(_NativeV8EngineProxy, -1); // TODO: Consider associating a user-defined string value to store instead.
+            return new InternalHandle(V8NetProxy.CreateObject(_NativeV8EngineProxy, -1), true); // TODO: Consider associating a user-defined string value to store instead.
         }
 
         /// <summary>
@@ -825,11 +896,11 @@ namespace V8.Net
         {
             HandleProxy** nativeArrayMem = items.Length > 0 ? Utilities.MakeHandleProxyArray(items) : null;
 
-            InternalHandle handle = V8NetProxy.CreateArray(_NativeV8EngineProxy, nativeArrayMem, items.Length);
+            InternalHandle result = new InternalHandle(V8NetProxy.CreateArray(_NativeV8EngineProxy, nativeArrayMem, items.Length), true);
 
             Utilities.FreeNativeMemory((IntPtr)nativeArrayMem);
 
-            return handle;
+            return result;
         }
 
         /// <summary>
@@ -877,7 +948,7 @@ namespace V8.Net
         public InternalHandle CreateValue(IEnumerable<string> items)
         {
             var _items = items?.ToArray(); // (the enumeration could be lengthy depending on the implementation, so iterate it only once and dump it to an array)
-            if (_items == null || _items.Length == 0) return V8NetProxy.CreateArray(_NativeV8EngineProxy, null, 0);
+            if (_items == null || _items.Length == 0) return new InternalHandle(V8NetProxy.CreateArray(_NativeV8EngineProxy, null, 0), true);
 
             int strBufSize = 0; // (size needed for the string chars portion of the memory block)
             int itemsCount = 0;
@@ -904,7 +975,7 @@ namespace V8.Net
                 strWritePtr += itemLength + 1;
             }
 
-            InternalHandle handle = V8NetProxy.CreateStringArray(_NativeV8EngineProxy, oneBigStringBlock, itemsCount);
+            InternalHandle handle = new InternalHandle(V8NetProxy.CreateStringArray(_NativeV8EngineProxy, oneBigStringBlock, itemsCount), true);
 
             Utilities.FreeNativeMemory((IntPtr)oneBigStringBlock);
 
@@ -916,7 +987,7 @@ namespace V8.Net
         /// <summary>
         /// Simply creates and returns a 'null' JavaScript value.
         /// </summary>
-        public InternalHandle CreateNullValue() { return V8NetProxy.CreateNullValue(_NativeV8EngineProxy); }
+        public InternalHandle CreateNullValue() { return new InternalHandle(V8NetProxy.CreateNullValue(_NativeV8EngineProxy), true); }
 
         // --------------------------------------------------------------------------------------------------------------------
 
@@ -935,56 +1006,350 @@ namespace V8.Net
         /// <returns>A native value that best represents the given managed value.</returns>
         public InternalHandle CreateValue(object value, bool? recursive = null, ScriptMemberSecurity? memberSecurity = null)
         {
+            var jsRes = InternalHandle.Empty;
             if (value == null)
-                return CreateNullValue();
+                jsRes = CreateNullValue();
             else if (value is IHandleBased)
-                return ((IHandleBased)value).InternalHandle; // (already a V8.NET value!)
+                jsRes = ((IHandleBased)value).InternalHandle; // (already a V8.NET value!)
             else if (value is bool)
-                return CreateValue((bool)value);
+                jsRes = CreateValue((bool)value);
             else if (value is byte)
-                return CreateValue((Int32)(byte)value);
+                jsRes = CreateValue((Int32)(byte)value);
             else if (value is sbyte)
-                return CreateValue((Int32)(sbyte)value);
+                jsRes = CreateValue((Int32)(sbyte)value);
             else if (value is Int16)
-                return CreateValue((Int32)(Int16)value);
+                jsRes = CreateValue((Int32)(Int16)value);
             else if (value is UInt16)
-                return CreateValue((Int32)(UInt16)value);
+                jsRes = CreateValue((Int32)(UInt16)value);
             else if (value is Int32)
-                return CreateValue((Int32)value);
+                jsRes = CreateValue((Int32)value);
             else if (value is UInt32)
-                return CreateValue((double)(UInt32)value);
+                jsRes = CreateValue((double)(UInt32)value);
             else if (value is Int64)
-                return CreateValue((double)(Int64)value); // (warning: data loss may occur when converting 64int->64float)
+                jsRes = CreateValue((double)(Int64)value); // (warning: data loss may occur when converting 64int->64float)
             else if (value is UInt64)
-                return CreateValue((double)(UInt64)value); // (warning: data loss may occur when converting 64int->64float)
+                jsRes = CreateValue((double)(UInt64)value); // (warning: data loss may occur when converting 64int->64float)
             else if (value is Single)
-                return CreateValue((double)(Single)value);
+                jsRes = CreateValue((double)(Single)value);
             else if (value is float)
-                return CreateValue((double)(float)value);
+                jsRes = CreateValue((double)(float)value);
             else if (value is double)
-                return CreateValue((double)value);
+                jsRes = CreateValue((double)value);
             else if (value is string)
-                return CreateValue((string)value);
+                jsRes = CreateValue((string)value);
             else if (value is char)
-                return CreateValue(((char)value).ToString());
+                jsRes = CreateValue(((char)value).ToString());
             else if (value is StringBuilder)
-                return CreateValue(((StringBuilder)value).ToString());
+                jsRes = CreateValue(((StringBuilder)value).ToString());
             else if (value is DateTime)
-                return CreateValue((DateTime)value);
-            else if (value is TimeSpan)
-                return CreateValue((TimeSpan)value);
+                jsRes = CreateValue((DateTime)value);
             else if (value is Enum) // (enums are simply integer like values)
-                return CreateValue((int)value);
+                jsRes = CreateValue((int)value);
             else if (value is Array)
-                return CreateValue((IEnumerable)value);
-            else //??if (value.GetType().IsClass)
-                return CreateBinding(value, null, recursive, memberSecurity);
+                jsRes = CreateValue((IEnumerable)value);
+            else
+            {
+                jsRes = FromObject(value, createBinder: false);
+                if (jsRes.IsEmpty)
+                {
+                    if (value is TimeSpan)
+                        jsRes = CreateValue((TimeSpan)value);
+                    else //??if (value.GetType().IsClass)
+                        jsRes = CreateBinding(value, null, recursive, memberSecurity);
+                }
+            }
 
-            //??var type = value != null ? value.GetType().Name : "null";
-            //??throw new NotSupportedException("Cannot convert object of type '" + type + "' to a JavaScript value.");
+            if (jsRes.IsEmpty) {
+                throw new NotSupportedException($"Cannot convert object of type '{value.GetType().Name}' to a JavaScript value.");
+            }
+
+            if (IsMemoryChecksOn)
+            {
+                int expectedRefCount = 1 + (jsRes.IsRooted ? 1 : 0);
+                if (jsRes.RefCount != expectedRefCount)
+                    throw new InvalidOperationException($"Create value wrong ref count (not {expectedRefCount}): {jsRes.RefCount}");
+            }
+            
+            return jsRes;
+        }
+
+
+        public InternalHandle CreateClrCallBack(JSFunction func, bool keepAlive = true)
+        {
+            var jsFunc = CreateFunctionTemplate().GetFunctionObject<V8Function>(func)._;
+            if (keepAlive)
+                jsFunc.KeepAlive();
+            return jsFunc;
+        }
+
+        public static void Dispose(InternalHandle[] jsItems)
+        {
+            for (int i = 0; i < jsItems.Length; ++i)
+            {
+                jsItems[i].KeepAlive().Dispose();
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public InternalHandle CreateEmptyArray()
+        {
+            return CreateArray(Array.Empty<InternalHandle>());
+        }
+
+        public InternalHandle CreateArrayWithDisposal(InternalHandle[] jsItems)
+        {
+            var jsArr = CreateArray(jsItems);
+            Dispose(jsItems);
+            return jsArr;
         }
 
         // --------------------------------------------------------------------------------------------------------------------
+
+        public MemorySnapshot LastMemorySnapshotBefore
+        {
+
+            get => _Context.LastMemorySnapshotBefore;
+            set
+            {
+                _Context.LastMemorySnapshotBefore = value;
+            }
+        }
+
+        public Dictionary<string, MemorySnapshot> MemorySnapshots
+        {
+
+            get => _Context.MemorySnapshots;
+            set
+            {
+                _Context.MemorySnapshots = value;
+            }
+        }
+
+        public void AddToLastMemorySnapshotBefore(InternalHandle h)
+        {
+            if (IsMemoryChecksOn)
+                LastMemorySnapshotBefore?.Add(h);
+        }
+
+        public MemorySnapshot MakeMemorySnapshot(string name)
+        {
+            if (!IsMemoryChecksOn)
+                return null;
+        
+            MemorySnapshot snapshotBefore = null;
+            if (MemorySnapshots?.TryGetValue(name, out snapshotBefore) == true &&
+                snapshotBefore != null)
+            {
+                snapshotBefore.Init(this);
+            }
+            else {
+                snapshotBefore = new MemorySnapshot(this);
+                MemorySnapshots[name] = snapshotBefore;
+            }
+            LastMemorySnapshotBefore = snapshotBefore;
+            return snapshotBefore;
+        }
+
+        public bool RemoveMemorySnapshot(string name)
+        {
+            return MemorySnapshots.Remove(name);
+        }
+
+        public void CheckForMemoryLeaks(string name, bool shouldRemove = true)
+        {
+            if (!IsMemoryChecksOn)
+                return;
+                
+            if (MemorySnapshots == null)
+                MemorySnapshots = new Dictionary<string, MemorySnapshot>();
+                
+            MemorySnapshot snapshotBefore = null;
+            if (!(MemorySnapshots.TryGetValue(name, out snapshotBefore) == true &&
+                snapshotBefore != null))
+            {
+                throw new InvalidOperationException($"CheckForMemoryLeaks: No snapshotBefore named {name} exists");
+            }
+
+            if (shouldRemove)
+                RemoveMemorySnapshot(name);
+
+            string leakagesDescHandles = "";
+            string leakagesDescObjects = "";
+            string leakagesDescSubobjects = "";
+            using (var jsStringify = this.Execute("JSON.stringify", "JSON.stringify", true, 0))
+            {
+                snapshotBefore.Add(jsStringify);
+
+                var snapshotAfter = new MemorySnapshot(this);
+                
+                foreach (var i in snapshotAfter.ExistingHandleIDs)
+                {
+                    var hProxy = _HandleProxies[i];
+                    if (hProxy != null)
+                    {
+                        var h = new InternalHandle(hProxy, false);
+                        _GatherChilds(snapshotAfter, ref h);
+                    }
+                }
+                ForceV8GarbageCollection(); // here the suspected handle may be disposed by V8 so we skip them if this has happened
+
+                foreach (var i in snapshotAfter.ExistingHandleIDs)
+                {
+                    var hProxy = _HandleProxies[i];
+                    if (hProxy != null)
+                    {
+                        bool isLeaked = !hProxy->IsCLRDisposed && !snapshotBefore.ExistingHandleIDs.Contains(i);
+                        if (isLeaked) {
+                            var h = new InternalHandle(hProxy, false);
+                            int refDiscount = h.IsRooted ? 1 : 0; //kvp.Value;
+                            if (!h.IsCLRDisposed) {
+                                int countParents = 0;
+                                snapshotAfter.ChildHandleIDs.TryGetValue(h.HandleID, out countParents);
+                                if (h.RefCount > refDiscount + countParents)
+                                    leakagesDescHandles += _LeakageDesc(h, true, jsStringify);                        
+                            }
+                        }
+                    }
+                }
+
+                Int32 objectsCount = 0;
+                using (_ObjectsLocker.ReadLock()) { 
+                    objectsCount = _Objects.Count;
+                }
+
+                foreach (var i in snapshotAfter.ExistingObjectIDs)
+                {
+                    V8NativeObject no = _GetExistingObject(i);
+                    bool isLeaked = no != null && !snapshotBefore.ExistingObjectIDs.Contains(i);
+                    if (isLeaked) {
+                        InternalHandle h = InternalHandle.Empty;
+                        if (isLeaked) {
+                            h = no._;
+                        }
+
+                        if (!h.IsCLRDisposed) {
+                            if (!h.IsEmpty) {
+                                int refDiscount = h.IsRooted ? 1 : 0;
+                                int countParents = 0;
+                                snapshotAfter.ChildHandleIDs.TryGetValue(h.HandleID, out countParents);
+
+                                if (h.RefCount > refDiscount + countParents)
+                                    leakagesDescObjects += _LeakageDesc(h, true, jsStringify);                        
+                            }
+                            else {
+                                leakagesDescObjects += $"objectID={i}\n";
+                            }
+                        }
+                    }
+                }
+            }
+
+            string leakagesDesc = "";
+            if (leakagesDescHandles != "") {
+                leakagesDesc += "\nLeaked internal handles:\n" + leakagesDescHandles;
+            }
+            if (leakagesDescObjects != "") {
+                leakagesDesc += "\nLeaked managed objects:\n" + leakagesDescObjects;
+            }
+
+            if (leakagesDesc != "") {
+                throw new InvalidOperationException($"Memory leakage in {name}: " + leakagesDesc);
+            }
+        }
+
+        /*private InternalHandle _GetUltimateNonDisposedParent(MemorySnapshot snapshotBefore, ref InternalHandle h)
+        {
+            //InternalHandle res = h;
+            while (!h.IsCLRDisposed && h.IsObjectType && h.RefCount >= 1)
+            {
+                object obj = null;
+                if (h.IsBinder) {
+                    obj = h.BoundObject;
+                }
+                else {
+                    obj = h.Object;
+                }
+                IV8DebugInfo di = obj as IV8DebugInfo;
+                if (di == null)
+                    break;
+
+                if (di.ParentID == null || di.ParentID.ObjectID < 0  || snapshotBefore.ExistingObjectIDs.Contains(di.ParentID.ObjectID))
+                    break;
+                V8NativeObject pno = _GetExistingObject(di.ParentID.ObjectID);
+                if (pno == null)
+                    break;
+                h = pno._;
+                ForceV8GarbageCollection();
+            }
+            return h;
+        }*/
+
+        private void _GatherChilds(MemorySnapshot snapshotBefore, ref InternalHandle h)
+        {
+            if (!(!h.IsCLRDisposed && h.IsObjectType && h.RefCount >= 1))
+                return;
+
+            object obj = null;
+            if (h.IsBinder) {
+                obj = h.BoundObject;
+            }
+            else {
+                obj = h.Object;
+            }
+            IV8DebugInfo di = obj as IV8DebugInfo;
+            if (di == null)
+                return;
+
+            List<V8EntityID> childIDs = di.ChildIDs;
+            if (childIDs != null && !h.IsCLRDisposed) {
+                foreach (var childID in childIDs) {
+                    var childHandleID = childID.HandleID;
+                    int countParents = 0;
+                    snapshotBefore.ChildHandleIDs.TryGetValue(childHandleID, out countParents);
+                    snapshotBefore.ChildHandleIDs[childHandleID] = countParents + 1;
+                }
+            }
+        }
+
+
+        private string _LeakageDesc(InternalHandle h, bool isLeaked, InternalHandle jsStringify)
+        {
+            string leakagesDesc = "";
+            string summary = h.Summary;
+            string errorKind = isLeaked ? "Leakage" : "Destroyed";
+            leakagesDesc += $"{errorKind}: {summary}";
+
+            if (false) 
+            {
+                using (var jsStrValue = jsStringify.StaticCall(h)) {
+                    leakagesDesc += $", value={jsStrValue.AsString}";
+                }
+            }
+
+            leakagesDesc += "\n";
+            return leakagesDesc;
+        }
+
+    }
+
+    public class V8EntityID
+    {
+        public Int32 HandleID;
+        public Int32 ObjectID;
+
+        public V8EntityID(Int32 handleID, Int32 objectID = -1)
+        {
+            HandleID = handleID;
+            ObjectID = objectID;
+        }
+    }
+
+    public interface IV8DebugInfo
+    {
+        V8EntityID SelfID {get; set;}
+        V8EntityID ParentID {get;}
+        List<V8EntityID> ChildIDs {get;}
+        string Summary {get;}
     }
 
     // ========================================================================================================================

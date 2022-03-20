@@ -144,8 +144,8 @@ namespace V8.Net
 
     internal class _WeakReferenceTag : _ReferenceTag
     {
-        public WeakReference<_ReferenceTag> WeakRefTag;
-        public _WeakReferenceTag(_ReferenceTag refTag) { WeakRefTag = new WeakReference<_ReferenceTag>(refTag); }
+        public CountedReference<_ReferenceTag> WeakRefTag;
+        public _WeakReferenceTag(_ReferenceTag refTag) { WeakRefTag = new CountedReference<_ReferenceTag>(refTag); }
 
         /// <summary>
         /// Returns true if the reference tag wrapped in this object was collected.

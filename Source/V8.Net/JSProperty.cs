@@ -68,23 +68,21 @@ namespace V8.Net
 
         ~JSProperty()
         {
-            if (CanDispose)
-            {
-                Dispose();
-            }
-            else
-            {
-                GC.SuppressFinalize(this);
-            }
-            //?this.Finalizing();
+            Dispose(false);
         }
 
-        public bool CanDispose { get { return _Value.CanDispose; } }
-
         public void Dispose()
+        {  
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected void Dispose(bool disposing)
         {
             _Value.Dispose();
         }
+
+        public bool CanDispose { get { return _Value.CanDispose; } }
 
         public static implicit operator InternalHandle(JSProperty<TValueSource> jsVal)
         { return jsVal._Value; }

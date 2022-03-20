@@ -14,13 +14,164 @@ namespace V8.Net
 {
     // ========================================================================================================================
 
-    /// <summary> Allows overriding the weak reference by rooting the target object to this entry. </summary>
-    public unsafe class RootableWeakReference : WeakReference
+    public unsafe class Reference
+    {
+        public object Target;
+
+        public Reference(object target, bool trackResurrection = true)
+        {
+            Target = target;
+        }
+
+    }
+
+
+    public unsafe class CountedReference : Reference, IDisposable
     {
         /// <summary> Allows overriding the weak reference by rooting the target object to this entry. </summary>
-        public object RootedReference;
-        public RootableWeakReference(IV8NativeObject target, bool trackResurrection = true) : base(target, trackResurrection)
+        private int _RefCount;
+        internal const int UndefinedRefCount = -999;
+
+        private bool _disposed = false;
+
+        public CountedReference(Handle target, bool trackResurrection = true) : base(target, trackResurrection)
         {
+            Reinitialize(target);
+        }
+
+        ~CountedReference()
+        {            
+            Dispose(false);
+        }
+
+        public void Dispose()
+        {  
+            Dispose(true);
+        }
+
+        protected void Dispose(bool disposing)
+        {
+            if (_disposed)
+                return;
+
+            if (disposing) {
+                //GC.SuppressFinalize(this);
+            }
+
+            _disposed = true;
+        }
+
+        public void Reinitialize(Handle target)
+        {
+            Reset(target);
+            //Inc();
+        }
+
+
+        public void Reset(Handle target = null)
+        {
+//#if DEBUG
+            var hTarget = Target as Handle;
+            if (hTarget != null)
+            {
+                InternalHandle h = hTarget._;
+                if (h.IsMemoryChecksOn)
+                {
+                    if (IsLocked) {
+                        throw new InvalidOperationException($"Can't reinitialize CountedReference: RefCount={_RefCount}, Target.HandleID={h.HandleID}, Target.ValueType={h.ValueType}.");
+                    }
+                }
+            }
+//#endif
+
+            if (target == null && Target != null) {
+                GC.SuppressFinalize(Target);
+            }
+            Target = target;
+            _RefCount = target != null ? 0 : UndefinedRefCount;
+        }
+
+        public bool IsToBeKeptAlive {
+            get {
+                return false;
+            }
+            set {
+            }
+        }
+
+        public int RefCount {
+            get {
+                return _RefCount;
+            }
+        }
+
+        public bool IsRefCountPresent {
+            get {
+                return _RefCount != UndefinedRefCount;
+            }
+        }
+
+        public bool IsLocked {
+            get 
+            {
+                return _RefCount > 0;
+            }
+        }
+
+        public void Inc()
+        {
+            var hTarget = Target as Handle;
+            if (hTarget != null)
+            {
+                InternalHandle h = hTarget._;
+                if (h.IsMemoryChecksOn)
+                {
+                    if (IsRefCountPresent && _RefCount < 0) {
+                        throw new InvalidOperationException($"Can't Inc CountedReference: RefCount={_RefCount}, Target.HandleID={h.HandleID}, Target.ValueType={h.ValueType}.");
+                    }
+                }
+            }
+
+            if (_RefCount >= 0) {
+                _RefCount += 1;
+            }
+        }
+
+        public void Dec()
+        {
+            var hTarget = Target as Handle;
+            if (hTarget != null)
+            {
+                InternalHandle h = hTarget._;
+                if (h.IsMemoryChecksOn)
+                {
+                    if (IsRefCountPresent && _RefCount <= 0) {
+                        throw new InvalidOperationException($"Can't Dec CountedReference: RefCount={_RefCount}, Target.HandleID={h.HandleID}, Target.ValueType={h.ValueType}.");
+                    }
+                }
+            }
+
+            if (_RefCount > 0) {
+                _RefCount -= 1;
+            }
+        }
+    }
+
+
+
+    /// <summary> Allows overriding the weak reference by rooting the target object to this entry. </summary>
+    public unsafe class RootableReference : Reference
+    {
+        /// <summary> Allows overriding the weak reference by rooting the target object to this entry. </summary>
+        public InternalHandle RootedHandle = InternalHandle.Empty;
+
+        public RootableReference(IV8NativeObject target, bool trackResurrection = true) : base(target, trackResurrection)
+        {
+        }
+
+        ~RootableReference()
+        {
+            RootedHandle.CountedRef?.Dec();
         }
     }
 
@@ -31,8 +182,10 @@ namespace V8.Net
         /// <summary>
         /// Holds an index of all the created objects.
         /// </summary>
-        internal readonly IndexedObjectList<RootableWeakReference> _Objects = new IndexedObjectList<RootableWeakReference>();
+        internal readonly IndexedObjectList<RootableReference> _Objects = new IndexedObjectList<RootableReference>();
         internal readonly ReaderWriterLock _ObjectsLocker = new ReaderWriterLock();
+        //internal IndexedObjectList<RootableReference> _Objects => _Context?._Objects;
+        //internal ReaderWriterLock _ObjectsLocker => _Context?._ObjectsLocker;
 
         // --------------------------------------------------------------------------------------------------------------------
 
@@ -44,29 +197,103 @@ namespace V8.Net
 
         // --------------------------------------------------------------------------------------------------------------------
 
-        internal WeakReference _GetObjectWeakReference(Int32 objectID) // (performs the lookup in a lock block)
+        internal RootableReference _GetObjectCountedReference(int objectID) // (performs the lookup in a lock block)
         {
-            using (_ObjectsLocker.ReadLock()) { return _Objects[objectID]; } // (Note: if index is outside bounds, then null is returned.)
+            using (_ObjectsLocker.ReadLock()) { 
+                return _Objects[objectID];  // (Note: if index is outside bounds, then null is returned.)
+            }
         }
 
-        internal V8NativeObject _GetExistingObject(Int32 objectID) // (performs the object lookup in a lock block without causing a GC reset)
+        internal V8NativeObject _GetExistingObject(int objectID) // (performs the object lookup in a lock block without causing a GC reset)
         {
-            using (_ObjectsLocker.ReadLock()) { var weakRef = _Objects[objectID]; return weakRef != null ? (V8NativeObject)weakRef.Target : null; }
+            if (objectID < 0)
+                return null;
+
+            using (_ObjectsLocker.ReadLock()) { 
+                var rootableRef = _Objects[objectID]; 
+                return (V8NativeObject)rootableRef?.Target; 
+            }
         }
 
-        internal void _RemoveObjectWeakReference(Int32 objectID) // (performs the removal in a lock block)
+        internal void _RemoveObjectRootableReference(int objectID) // (performs the removal in a lock block)
         {
-            using (_ObjectsLocker.WriteLock()) { _Objects.Remove(objectID); }
+            if (objectID < 0)
+                return;
+
+            if (_UnrootObject(objectID)) { 
+                using (_ObjectsLocker.WriteLock()) { 
+    //#if DEBUG
+                    // RootedHandle is to be empty here
+                    var rootableRef = _Objects[objectID]; 
+                    if (rootableRef != null && !rootableRef.RootedHandle.IsEmpty) {
+                        throw new InvalidOperationException($"Attempt to remove rooted object: some Inc have been missed or extra Dec has been peformed: objectID={objectID}");
+                    }
+    //#endif
+                    _Objects.Remove(objectID);
+                }
+            } 
         }
 
-        internal bool _MakeObjectRooted(Int32 objectID) // (looks up the object and attempts to make it rooted)
+        public bool IsObjectRooted(int objectID) // (looks up the object and attempts to make it unrooted)
         {
-            using (_ObjectsLocker.ReadLock()) { var weakRef = _Objects[objectID]; if (weakRef != null && weakRef.RootedReference == null) { weakRef.RootedReference = weakRef.Target; return true; } return false; }
+            if (objectID < 0)
+                return false;
+
+            using (_ObjectsLocker.ReadLock()) { 
+                var rootableRef = _Objects[objectID]; 
+                return !(rootableRef?.RootedHandle.IsEmpty ?? true); 
+            }
         }
 
-        internal bool _UnrootObject(Int32 objectID) // (looks up the object and attempts to make it unrooted)
+        internal bool _MakeObjectRooted(int objectID, object obj, InternalHandle h) // (looks up the object and attempts to make it rooted)
         {
-            using (_ObjectsLocker.ReadLock()) { var weakRef = _Objects[objectID]; if (weakRef != null && weakRef.RootedReference != null) { weakRef.RootedReference = null; return true; } return false; }
+            if (objectID < 0)
+                return false;
+
+            using (_ObjectsLocker.ReadLock()) { 
+                var rootableRef = _Objects[objectID]; 
+                if (rootableRef != null && rootableRef.RootedHandle.IsEmpty) { 
+                    rootableRef.RootedHandle = new InternalHandle(ref h, true);
+                } 
+                else {
+                    return false; 
+                }
+            }
+            return true; 
+        }
+
+        /*internal bool _UnrootObject(NativeContext* nativeContext, HandleProxy* handleProxy)
+        {
+
+        }*/
+
+        internal bool _UnrootObject(int objectID) // (looks up the object and attempts to make it unrooted)
+        {
+            if (objectID < 0)
+                return false;
+
+            var h = InternalHandle.Empty;
+            using (_ObjectsLocker.ReadLock()) { 
+                var rootableRef = _Objects[objectID]; 
+                if (rootableRef != null) { 
+                    if (!rootableRef.RootedHandle.IsEmpty) { 
+                        h = rootableRef.RootedHandle;
+                        rootableRef.RootedHandle = InternalHandle.Empty;
+                    }
+                    else {
+                        return true;
+                    }
+                } 
+                else {
+                    return false; 
+                }
+            }
+            if (!h.IsEmpty) {
+                return h.TryDispose();
+            }
+            else {
+                return true;
+            }
         }
 
         // --------------------------------------------------------------------------------------------------------------------
@@ -110,7 +337,7 @@ namespace V8.Net
 
             using (_ObjectsLocker.WriteLock()) // (need a lock because of the worker thread)
             {
-                var objID = _Objects.Add(new RootableWeakReference(newObject));
+                var objID = _Objects.Add(new RootableReference(newObject));
                 newObject._ID = objID;
                 newObject._Handle.ObjectID = objID;
             }
@@ -133,7 +360,7 @@ namespace V8.Net
                     catch (Exception ex)
                     {
                         // ... something went wrong, so remove the new managed object ...
-                        _RemoveObjectWeakReference(newObject.ID);
+                        _RemoveObjectRootableReference(newObject.ID);
                         handle.ObjectID = -1; // (existing ID no longer valid)
                         throw ex;
                     }
@@ -175,7 +402,7 @@ namespace V8.Net
         // --------------------------------------------------------------------------------------------------------------------
 
         /// <summary>
-        /// Same as "GetObject()", but used internally for getting objects that are associated with templates (such as getting function prototype objects).
+        /// Same as "Get_RemoveObjectRootableReferenceally for getting objects that are associated with templates (such as getting function prototype objects).
         /// </summary>
         internal T _GetObject<T>(ITemplate template, InternalHandle handle, bool createIfNotFound = true, bool initializeOnCreate = true, bool connectNativeObject = true)
             where T : V8NativeObject, new()
@@ -222,7 +449,7 @@ namespace V8.Net
         /// <summary>
         /// Returns all the objects using a filter expression. If no expression is given, all objects will be included.
         /// <para>Warning: This method enumerates using 'yield return' while keeping a read lock on the internal V8NativeObject 
-        /// WeakReference collection. It is recommended to dump the results to an array or list if enumeration will be deferred
+        /// CountedReference collection. It is recommended to dump the results to an array or list if enumeration will be deferred
         /// at any point.</para>
         /// </summary>
         public IEnumerable<V8NativeObject> GetObjects(Func<V8NativeObject, bool> filter = null)
@@ -236,10 +463,10 @@ namespace V8.Net
 
                 for (var i = _Objects.Count - 1; i >= 0; --i) // (just in case items get added [whish should never happen!])
                 {
-                    var wref = _Objects[i];
-                    if (wref != null)
+                    var cref = _Objects[i];
+                    if (cref != null)
                     {
-                        var obj = wref.Target as V8NativeObject;
+                        var obj = cref.Target as V8NativeObject;
                         if (obj != null && (filter == null || filter(obj)))
                             yield return obj;
                     }

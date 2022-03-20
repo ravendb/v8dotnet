@@ -116,7 +116,7 @@ namespace V8.Net
         /// <summary>
         /// The handle has lost all managed side references and was marked weak on the native side.
         /// </summary>
-        public bool IsCLRDisposed => (Disposed & 2) > 0 || (Disposed & 4) > 0 || ManagedReference < 2;
+        public bool IsCLRDisposed => (Disposed & 2) > 0 || (Disposed & 4) > 0 || ManagedReference < 2 || IsDisposing;
 
         ///// <summary>
         ///// The handle is going through the disposal process. 
@@ -135,6 +135,13 @@ namespace V8.Net
         /// </summary>
         public bool IsDisposed => (Disposed & 1) > 0;
 
+        public string Summary {
+            get {
+                return $"engineID={EngineID}, handleID={ID}, objectID={_ObjectID}, type={_Type}, clrTypeID={_CLRTypeID}, disposed={Disposed}, managedReference={ManagedReference}";
+            }
+        }
+
+
         // --------------------------------------------------------------------------------------------------------------------
 
         public object Value
@@ -152,6 +159,29 @@ namespace V8.Net
                     case JSValueType.Int32: return (Int32)V8Integer;
                     case JSValueType.Number: return V8Number;
                     case JSValueType.NumberObject: return V8Number; // TODO: Test this.
+                    case JSValueType.Date: return new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddMilliseconds(V8Number);
+                    default: return V8String != null ? Marshal.PtrToStringUni((IntPtr)V8String) : null;
+                        // TODO: Detect arrays and return them also.
+                }
+            }
+        }
+
+        public object ValueRaw
+        {
+            get
+            {
+                if (_Type == JSValueType.Uninitialized)
+                    throw new InvalidOperationException("Type is not yet initialized - you must call 'V8NetProxy.UpdateHandleValue()' first.");
+                switch (_Type)
+                {
+                    case JSValueType.Undefined: return "undefined";
+                    case JSValueType.Null: return null;
+                    case JSValueType.Bool: return !(V8Boolean == 0);
+                    case JSValueType.BoolObject: return V8Boolean; // TODO: Test this.
+                    case JSValueType.Int32: return (Int32)V8Integer;
+                    case JSValueType.Number: return V8Number;
+                    case JSValueType.NumberObject: return V8Number; // TODO: Test this.
+                    case JSValueType.Date: return V8Number;
                     default: return V8String != null ? Marshal.PtrToStringUni((IntPtr)V8String) : null;
                         // TODO: Detect arrays and return them also.
                 }
